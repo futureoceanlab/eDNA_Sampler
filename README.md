@@ -40,10 +40,10 @@ Finally, check the Firewall if the client cannot access the webapp.
 The system uses ESP8266 Huzzah from Adafruit and a variety of libraries, and thus, Arduino IDE requires some setup.
 
 In particular, the libraries that need to be installed are:
-[ESP8266](https://learn.adafruit.com/adafruit-huzzah-esp8266-breakout/using-arduino-ide)
-[GrooveNfc](https://github.com/Seeed-Studio/Seeed_Arduino_NFC)
-ArduinoJson
-[MS5837](https://github.com/bluerobotics/BlueRobotics_MS5837_Library)
-[TSYS01](https://github.com/bluerobotics/BlueRobotics_TSYS01_Library)
+[ESP8266](https://learn.adafruit.com/adafruit-huzzah-esp8266-breakout/using-arduino-ide), 
+[GrooveNfc](https://github.com/Seeed-Studio/Seeed_Arduino_NFC), 
+ArduinoJson,
+[MS5837](https://github.com/bluerobotics/BlueRobotics_MS5837_Library), 
+[TSYS01](https://github.com/bluerobotics/BlueRobotics_TSYS01_Library).
 
 [ESP8266 Huzzah](https://learn.adafruit.com/adafruit-huzzah-esp8266-breakout/using-arduino-ide) explains how to program the device using FTDI converter.

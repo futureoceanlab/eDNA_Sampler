@@ -87,6 +87,9 @@
 #define IS_MS5837 1
 // Uncomment if want serial output for debugging
 #define SERIAL_DUMP 1
+// Uncomment if using FTB431 (wire one) 
+// Comment if using FTB2003
+#define IS_FTB431 1
 
 // Deployment configuration parameters
 int target_depth=0, target_pump_wait=0;
@@ -141,6 +144,8 @@ static void ICACHE_RAM_ATTR isr_flowmeter(void);
 void data_log(void);
 // Concatenate string for home url
 String get_home_url(void);
+// Convert milliliter to ticks
+uint32_t convert_ml_to_ticks(uint32_t ml);
 // blink all leds
 void blink_all(void);
 // blink a single led of specified led
@@ -352,6 +357,15 @@ void blink_single_led(int led) {
   digitalWrite(led, !(digitalRead(led)));
 }
 
+uint32_t convert_ml_to_ticks(uint32_t ml) {
+  #ifdef IS_FTB431
+  uint32_t ticks = (uint32_t)((float) ml / 0.36705f);
+  #else // FTB2003
+  uint32_t ticks = (uint32_t)((float) ml) / 4600);
+  #endif
+  return ticks;
+}
+
 
 void setup_pins() {
   // GPIO for LED Indicators (OUTPUT)
@@ -533,7 +547,7 @@ void query_deployment_configurations(String home_url) {
         // Parameters
         target_depth = jsonBuffer["depth"];
         target_pump_wait = jsonBuffer["pump_wait"];
-        target_flow_vol = jsonBuffer["flow_volume"];
+        target_flow_vol = convert_ml_to_ticks(jsonBuffer["flow_volume"]);
         target_flow_duration = jsonBuffer["flow_duration"];
         http.end();
         delay(1000);
