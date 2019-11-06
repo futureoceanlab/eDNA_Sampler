@@ -91,9 +91,9 @@
 // Uncomment if using MS5837 pressure sensor
 #define IS_MS5837 1
 // Uncomment if want serial output for debugging
-#define SERIAL_DUMP 1
-// Uncomment if using FTB431 (wire one) 
-// Comment if using FTB2003
+#define DEBUG 1
+// Uncomment if using FTB431 flowmeter (wire one) 
+// Comment if using FTB2003 flowmeter
 #define IS_FTB431 1
 
 // Deployment configuration parameters
@@ -187,8 +187,9 @@ void query_deployment_configurations(String home_url);
  * 
  */
 void setup() {
+  #ifdef DEBUG
   Serial.begin(9600);
-  
+  #endif
   // 0. setup GPIO pins, i2c, filesystem and isr
   // Blink all LEDs while hardware getting ready
   ticker_led.attach_ms(500, blink_all);
@@ -207,9 +208,11 @@ void setup() {
   ticker_led.attach_ms(500, blink_single_led, LED_PWR);
   WiFi.begin(LOCAL_SSID, LOCAL_PWD);
   while (WiFi.status() != WL_CONNECTED) { delay(1000); }
+  #ifdef DEBUG
   Serial.print("Connected, IP address: ");
   Serial.println(WiFi.localIP());
-  
+  #endif
+
   String home_url = get_home_url();
 
   // 2. Synch RTC
@@ -237,10 +240,18 @@ void setup() {
   data_file = "/";
   data_file.concat(eDNA_uid);
   data_file.concat(".txt");
+  #ifdef DEBUG
   Serial.print("Data file name: ");
   Serial.println(data_file);
+  #endif
+
   File data_f = SPIFFS.open(data_file, "w+");
-  if (!data_f) {Serial.println("Failed to open new file");}
+  if (!data_f) {
+    #ifdef DEBUG
+    Serial.println("Failed to open new file");
+    #endif
+  }
+  // First line of the file [time, device id, uid, num_entries]
   char f_header[100];
   sprintf(f_header, "%d,%d,%s,%d", \
       rtc.now().unixtime(), DEVICE_ID, eDNA_uid.c_str(), 0);
@@ -252,7 +263,9 @@ void setup() {
   
   // 1Hz data logging
   ticker.attach_ms(1000, data_log);
-  // dive_start = rtc.now().unixtime(); // Debugging purpose
+  #ifdef DEBUG
+  dive_start = rtc.now().unixtime(); // Debugging purpose
+  #endif
 }
 
 /***********************************************************
@@ -297,12 +310,28 @@ void loop() {
      submerged = 1;
    }
 
+    #ifdef DEBUG
+    // Pump control given based on depth, time and water volume
+    if ((pump_state == PUMP_READY) && 
+       (dive_start + target_pump_wait < t_data)) {
+      // TODO: Record the time at which the pump start 
+      Serial.println("Pump ON");
+//      digitalWrite(PUMP_PIN, HIGH);
+      pump_start = t_data;
+      pump_state = PUMP_RUNNING;
+    } else if ((pump_state == PUMP_RUNNING) && 
+      (pump_start + target_flow_duration < t_data)) {
+      Serial.println("Pump OFF");
+      // TODO: Record the time at which the pump ended
+//      digitalWrite(PUMP_PIN, LOW);
+      pump_state = PUMP_ENDED;
+    }
+    #else
    // Pump control given based on depth, time and water volume
     if ((pump_state == PUMP_READY) && 
        ((dive_start + target_pump_wait < t_data) ||
        (abs(p_data - target_depth) < DEPTH_MARGIN)) {
       // TODO: Record the time at which the pump start 
-      Serial.println("Pump ON");
 //      digitalWrite(PUMP_PIN, HIGH);
       pump_start = t_data;
       pump_state = PUMP_RUNNING;
@@ -310,11 +339,11 @@ void loop() {
       ((pump_start + target_flow_duration < t_data) ||
       (abs(p_data - target_depth) > DEPTH_MARGIN) || 
       (target_flow_vol > f_data)) {
-      Serial.println("Pump OFF");
       // TODO: Record the time at which the pump ended
 //      digitalWrite(PUMP_PIN, LOW);
       pump_state = PUMP_ENDED;
     }
+    #endif
     fLogData = 0; 
   }
 }
@@ -366,7 +395,6 @@ uint32_t convert_ml_to_ticks(uint32_t ml) {
 
 void setup_pins() {
   // GPIO for LED Indicators (OUTPUT)
-  Serial.println("Setting up pins");
   pinMode(LED_PWR, OUTPUT);
   pinMode(LED_RDYB, OUTPUT);
   pinMode(LED_RDYG, OUTPUT);
@@ -377,17 +405,24 @@ void setup_pins() {
 
   // Flowmeter
   pinMode(FM_PIN, INPUT_PULLUP);
+  #ifdef DEBUG
   Serial.println("Pins set");
+  #endif
 }
 
 
 void setup_i2c() {
   Wire.begin();
+  #ifdef DEBUG
   Serial.println("Setting up I2C...");
+  #endif
 
   // Pressure sensor
-  while (!p_sensor.init()) { 
+  while (!p_sensor.init()) {
+    #ifdef DEBUG
     Serial.println("pressure waiting...");
+    #endif
+
     delay(1000); 
   }  
   // Temperature sensor
@@ -395,24 +430,33 @@ void setup_i2c() {
   
   // Setup RTC
   if (!rtc.begin()) {
+    #ifdef DEBUG
     Serial.println("Couldn't find RTC");
+    #endif
+
     while (1);
   }
   if (rtc.lostPower()) {
+    #ifdef DEBUG
     Serial.println("RTC lost power, lets set the time!");
+    #endif
     // following line sets the RTC to the date & time this sketch was compiled
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   }
   
   // RFID
   nfc.begin();
+  #ifdef DEBUG
   Serial.println("NFC connected");
   Serial.println("done I2C");
+  #endif
 }
 
 
 void wait_RFID() {
+  #ifdef DEBUG
   Serial.println("RFID Waiting");
+  #endif
   // Block until there is a tag present
   while (!(nfc.tagPresent())) {}
 
@@ -420,7 +464,9 @@ void wait_RFID() {
   // Set UID parameter
   eDNA_uid = tag.getUidString();
   eDNA_uid.replace(" ", "");
+  #ifdef DEBUG
   Serial.println(eDNA_uid);
+  #endif
 }
 
 
@@ -441,7 +487,11 @@ void synchronize_rtc(String home_url) {
       httpCode = http.GET();
       deserializeJson(jsonBuffer, http.getString());
       t = (time_t) jsonBuffer["now"];
+
+      #ifdef DEBUG
       Serial.println(t);
+      #endif
+
       http.end();
       delay(1000);
     }
@@ -460,14 +510,15 @@ void upload_existing_data(String home_url) {
   while (dir.next()) {
     // Assumption: We only have relevant data
     String f_name = dir.fileName();
+    #ifdef DEBUG
     Serial.println(f_name);
+    #endif
     int idx = f_name.indexOf('.');
     if (idx != 9) continue;
 
     // Only upload data of [uid].txt format
     String uid = f_name.substring(1, idx);
     String upload_url = home_url + "/deployment/upload/" + uid;
-    Serial.println(upload_url);
     
     File cur_file = dir.openFile("r");
     uint16_t f_size = dir.fileSize();
@@ -540,7 +591,11 @@ void query_deployment_configurations(String home_url) {
       int httpCode = http.GET();
       if (httpCode > 0) {
         deserializeJson(jsonBuffer, http.getString());
+
+        #ifdef DEBUG
         Serial.println(http.getString());
+        #endif
+
         // Parameters for deployment configuration
         target_depth = jsonBuffer["depth"];
         target_pump_wait = jsonBuffer["pump_wait"];
