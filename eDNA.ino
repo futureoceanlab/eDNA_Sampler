@@ -76,6 +76,11 @@
 #define LED_RDYG 15             // Green LED
 #define DEPTH_MARGIN 10         // Target depth margin
 
+// Pump state variables
+#define PUMP_READY 0      // Pump has not yet started
+#define PUMP_RUNNING 1          // Pump is running
+#define PUMP_ENDED 2            // Pump has finished
+
 // WiFi Configuration
 #define LOCAL_SSID "MIT"      
 #define LOCAL_PWD ""
@@ -127,7 +132,7 @@ Ticker ticker_led;
 
 //flags
 volatile uint8_t fLogData = 0;
-volatile uint8_t fIsPumping = 0;
+volatile uint8_t pump_state = PUMP_READY;
 
 // bookkeeping parameters
 uint32_t dive_start, pump_start;
@@ -235,11 +240,10 @@ void setup() {
   Serial.print("Data file name: ");
   Serial.println(data_file);
   File data_f = SPIFFS.open(data_file, "w+");
-  if (!data_f) {
-    Serial.println("Failed to open new file");
-  }
+  if (!data_f) {Serial.println("Failed to open new file");}
   char f_header[100];
-  sprintf(f_header, "%d,%d,%s,%d", rtc.now().unixtime(), DEVICE_ID, eDNA_uid.c_str(), 0);
+  sprintf(f_header, "%d,%d,%s,%d", \
+      rtc.now().unixtime(), DEVICE_ID, eDNA_uid.c_str(), 0);
   data_f.println(f_header);
   data_f.close();
 
@@ -248,7 +252,7 @@ void setup() {
   
   // 1Hz data logging
   ticker.attach_ms(1000, data_log);
-  dive_start = rtc.now().unixtime();
+  // dive_start = rtc.now().unixtime(); // Debugging purpose
 }
 
 /***********************************************************
@@ -269,46 +273,12 @@ void setup() {
 void loop() {
   if (fLogData == 1) {
     p_sensor.read();
-    uint32_t p_data = (uint32_t) (p_sensor.pressure() * 100);
-    Serial.print("Pressure: ");
-    Serial.print(p_data);
+    uint32_t p_data = (uint32_t) (p_sensor.pressure());
     c_sensor.read();
     uint32_t c_data = (uint32_t) (c_sensor.temperature() * 100);
-    Serial.print(", Temp: ");
-    Serial.print(c_data);
-    Serial.print(", F: ");
-    Serial.println(f_data);
-    
-//    // At 5m, we turn off LEDs
-//    if (!submerged && p_sensor.depth() > 5) {
-//      // digitalWrite(LED, LOW);
-//      dive_start = t_data;
-//      submerged = 1;
-//    }
-
-//    // Pump control given based on depth, time and water volume
-    if ((fIsPumping == 0)&& 
-       (dive_start + target_pump_wait < t_data)) {
-//      ((abs(p_data - target_depth) < DEPTH_MARGIN) 
-      // Record the time at which the pump start
-      Serial.println("Pump ON");
-//      digitalWrite(PUMP_PIN, HIGH);
-      pump_start = t_data;
-      fIsPumping = 1;
-    } else if ((fIsPumping == 1) && 
-      (pump_start + target_flow_duration < t_data)){
-//      ((abs(p_data - target_depth) > DEPTH_MARGIN) 
-//      || (target_flow_vol > f_data) 
-      Serial.println("Pump OFF");
-      // Record the time at which the pump ended
-//      digitalWrite(PUMP_PIN, LOW);
-      fIsPumping = 2;
-    }
     // Write data to the data log file
-    // Format data
-    // Open file and save
     if (SPIFFS.exists(data_file)) {
-      // Need to update number of entries
+      // TODO: Need to update number of entries
       File f = SPIFFS.open(data_file, "a+");
       f.print(t_data);
       f.print(',');
@@ -319,9 +289,36 @@ void loop() {
       f.println(c_data);
       f.close();
     }
+
+   // At 5m, we turn off LEDs
+   if (!submerged && p_sensor.depth() > 5) {
+     // digitalWrite(LED, LOW);
+     dive_start = t_data;
+     submerged = 1;
+   }
+
+   // Pump control given based on depth, time and water volume
+    if ((pump_state == PUMP_READY) && 
+       ((dive_start + target_pump_wait < t_data) ||
+       (abs(p_data - target_depth) < DEPTH_MARGIN)) {
+      // TODO: Record the time at which the pump start 
+      Serial.println("Pump ON");
+//      digitalWrite(PUMP_PIN, HIGH);
+      pump_start = t_data;
+      pump_state = PUMP_RUNNING;
+    } else if ((pump_state == PUMP_RUNNING) && 
+      ((pump_start + target_flow_duration < t_data) ||
+      (abs(p_data - target_depth) > DEPTH_MARGIN) || 
+      (target_flow_vol > f_data)) {
+      Serial.println("Pump OFF");
+      // TODO: Record the time at which the pump ended
+//      digitalWrite(PUMP_PIN, LOW);
+      pump_state = PUMP_ENDED;
+    }
     fLogData = 0; 
   }
 }
+
 
 String get_home_url() {
   String home_url = "http://";
@@ -544,7 +541,7 @@ void query_deployment_configurations(String home_url) {
       if (httpCode > 0) {
         deserializeJson(jsonBuffer, http.getString());
         Serial.println(http.getString());
-        // Parameters
+        // Parameters for deployment configuration
         target_depth = jsonBuffer["depth"];
         target_pump_wait = jsonBuffer["pump_wait"];
         target_flow_vol = convert_ml_to_ticks(jsonBuffer["flow_volume"]);
