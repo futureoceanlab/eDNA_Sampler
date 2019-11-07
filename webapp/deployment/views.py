@@ -7,6 +7,8 @@ from django.template import loader
 from django.views.decorators.csrf import csrf_exempt
 from django.utils import timezone
 from django.utils.encoding import smart_str
+from django.core.exceptions import ObjectDoesNotExist
+
 
 
 from .models import Device, Deployment
@@ -110,6 +112,7 @@ def upload_deployment_data(request, uid):
                     dest.write(request.body[0:num_bytes])
                 print("Done")
                 deployment.has_data = True
+                deployment.is_new = False
                 deployment.save()
             else:
                 raise Http404("Unexpected nth chunk")
@@ -137,3 +140,15 @@ def create_deployment(request, device_id):
             deployment.save()
         return HttpResponse(status=200)
 
+def check_deployment(device_id):
+    if request.method == "GET":
+        device = Device.objects.get_object_or_404(device_id = device_id)
+        deployment = Deployment.objects.filter(device=device, is_new=True).order_by('deployment_date').first()
+        data = {}
+        if deployment:
+            data['status'] = 1
+            data['eDNA_UID'] = deployment.eDNA_UID
+        else:
+            data['status'] = 0
+        response = JsonResponse(data)
+        return response

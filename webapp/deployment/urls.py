@@ -9,5 +9,6 @@ urlpatterns = [
     path('delete/<int:deployment_id>', views.delete_deployment, name="delete_deployment"),
     path('upload/<slug:uid>', views.upload_deployment_data, name="upload_deployment_data"),
     path('create/<int:device_id>', views.create_deployment, name="create_deployment"),
-    path('datetime/now', views.get_datetime, name="datetime_sync")
+    path('datetime/now', views.get_datetime, name="datetime_sync"),
+    path('has_deployment/<int:device_id>', views.check_deployment, name="check_deployment")
 ]
