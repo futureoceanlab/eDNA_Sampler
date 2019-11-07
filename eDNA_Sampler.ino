@@ -77,14 +77,16 @@
 #define DEPTH_MARGIN 10         // Target depth margin
 
 // Pump state variables
-#define PUMP_READY 0      // Pump has not yet started
+#define PUMP_READY 0            // Pump has not yet started
 #define PUMP_RUNNING 1          // Pump is running
 #define PUMP_ENDED 2            // Pump has finished
 
+#define DEPLOYMENT_NOT_RDY 0    // RFID was not scanned
+#define DEPLOYMENT_RDY 1        // RFID was previously scanned
 // WiFi Configuration
 #define LOCAL_SSID "MIT"      
 #define LOCAL_PWD ""
-#define SERVER_IP "18.21.175.209"
+#define SERVER_IP "18.21.180.120"
 #define WEB_PORT "5000"
 #define CHUNK_SIZE 1<<11         // Data chunk size for uploading
 
@@ -166,6 +168,8 @@ void wait_RFID(void);
 void synchronize_rtc(String home_url);
 // Upload data file, broken into chunks, to the webserver
 void upload_existing_data(String home_url);
+// Check if deployment has been configured (i.e. RFID scanned)
+uint8_t check_deployment_status(String home_url);
 // Create new deployment on the webserver
 void upload_new_deployment(String home_url);
 // Query the deployment configuration from the webserver
@@ -223,49 +227,63 @@ void setup() {
   ticker_led.detach();
   digitalWrite(LED_PWR, LOW);
 
-  // 4. Scan RFID
-  ticker_led.attach_ms(500, blink_single_led, LED_RDYB);
-  wait_RFID();
- 
-  // 5. Create deployment log file and upload the upcoming deployment
-  upload_new_deployment(home_url);
-  ticker_led.detach();
-  digitalWrite(LED_RDYB, LOW);
+  // 4. Check if deployment is setup online
+  // check_deployment_status() will set the eDNA_UID shared variable
+  uint8_t deployment_status = check_deployment_status(home_url);
 
-  // 6. Wait until the deployment configuration is set
-  ticker_led.attach_ms(500, blink_single_led, LED_RDYG);
-  query_deployment_configurations(home_url);
-
-  // 7. Start logging
-  data_file = "/";
-  data_file.concat(eDNA_uid);
-  data_file.concat(".txt");
-  #ifdef DEBUG
-  Serial.print("Data file name: ");
-  Serial.println(data_file);
-  #endif
-
-  File data_f = SPIFFS.open(data_file, "w+");
-  if (!data_f) {
+  if (deployment_status != DEPLOYMENT_RDY) {
+    // 4. Scan RFID 
+    nfc.begin();
     #ifdef DEBUG
-    Serial.println("Failed to open new file");
+    Serial.println("NFC connected");
+    #endif
+    ticker_led.attach_ms(500, blink_single_led, LED_RDYB);
+    wait_RFID();
+    
+    // 5. Create deployment log file and upload the upcoming deployment
+    upload_new_deployment(home_url);
+    ticker_led.detach();
+    digitalWrite(LED_RDYB, LOW);
+
+    // 6. Wait until the deployment configuration is set
+    ticker_led.attach_ms(500, blink_single_led, LED_RDYG);
+    query_deployment_configurations(home_url);
+    
+  } else {
+    // 7. Deployment has previously been set, 
+    //    configure log file and start logging!
+    data_file = "/";
+    data_file.concat(eDNA_uid);
+    data_file.concat(".txt");
+    #ifdef DEBUG
+    Serial.print("Data file name: ");
+    Serial.println(data_file);
+    #endif
+
+    File data_f = SPIFFS.open(data_file, "w+");
+    if (!data_f) {
+      #ifdef DEBUG
+      Serial.println("Failed to open new file");
+      #endif
+    }
+    // First line of the file [time, device id, uid, num_entries]
+    char f_header[100];
+    sprintf(f_header, "%d,%d,%s,%d", \
+        rtc.now().unixtime(), DEVICE_ID, eDNA_uid.c_str(), 0);
+    data_f.println(f_header);
+    data_f.close();
+
+    ticker_led.detach();
+    digitalWrite(LED_RDYG, HIGH);
+    
+    // 1Hz data logging
+    ticker.attach_ms(1000, data_log);
+    #ifdef DEBUG
+    dive_start = rtc.now().unixtime(); // Debugging purpose
     #endif
   }
-  // First line of the file [time, device id, uid, num_entries]
-  char f_header[100];
-  sprintf(f_header, "%d,%d,%s,%d", \
-      rtc.now().unixtime(), DEVICE_ID, eDNA_uid.c_str(), 0);
-  data_f.println(f_header);
-  data_f.close();
 
-  ticker_led.detach();
-  digitalWrite(LED_RDYG, HIGH);
-  
-  // 1Hz data logging
-  ticker.attach_ms(1000, data_log);
-  #ifdef DEBUG
-  dive_start = rtc.now().unixtime(); // Debugging purpose
-  #endif
+
 }
 
 /***********************************************************
@@ -443,11 +461,7 @@ void setup_i2c() {
     // following line sets the RTC to the date & time this sketch was compiled
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   }
-  
-  // RFID
-  nfc.begin();
   #ifdef DEBUG
-  Serial.println("NFC connected");
   Serial.println("done I2C");
   #endif
 }
@@ -574,6 +588,26 @@ void upload_new_deployment(String home_url) {
     }
     http.end();
   }
+}
+
+uint8_t check_deployment_status(String home_url) {
+  uint8_t deployment_status = DEPLOYMENT_NOT_RDY;
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    String check_url = home_url + "/deployment/has_deployment/" + String(DEVICE_ID);
+    http.begin(check_url);
+    const size_t buffer_size = JSON_OBJECT_SIZE(2);
+    DynamicJsonDocument jsonBuffer(buffer_size);
+    int httpCode = http.GET();
+    if (httpCode > 0) {
+      deserializeJson(jsonBuffer, http.getString());
+      deployment_status = jsonBuffer["status"];
+      if (deployment_status == DEPLOYMENT_RDY) {
+        eDNA_uid = jsonBuffer["eDNA_UID"].as<String>();
+      }
+    }
+  }
+  return deployment_status;
 }
 
 void query_deployment_configurations(String home_url) {
