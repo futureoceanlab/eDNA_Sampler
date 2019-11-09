@@ -65,10 +65,11 @@
 #include "TimeLib.h"
 #include "RTClib.h"
 #include "MS5837.h"
+#include "KellerLD.h"
 #include "TSYS01.h"
 
 // Define global parameters 
-#define DEVICE_ID 1             // Hardcoded device ID
+#define DEVICE_ID 2             // Hardcoded device ID
 #define FM_PIN 14               // Flowmeter interrupt pin
 #define PUMP_PIN 12             // GPIO pin to control Vpump
 #define LED_PWR 13              // RED Led
@@ -86,12 +87,12 @@
 // WiFi Configuration
 #define LOCAL_SSID "MIT"      
 #define LOCAL_PWD ""
-#define SERVER_IP "18.21.180.120"
+#define SERVER_IP "18.21.135.5"
 #define WEB_PORT "5000"
-#define CHUNK_SIZE 1<<11         // Data chunk size for uploading
+#define CHUNK_SIZE 2048         // Data chunk size for uploading
 
 // Uncomment if using MS5837 pressure sensor
-#define IS_MS5837 1
+//#define IS_MS5837 1
 // Uncomment if want serial output for debugging
 #define DEBUG 1
 // Uncomment if using FTB431 flowmeter (wire one) 
@@ -200,6 +201,7 @@ void setup() {
 
   setup_pins();
   setup_i2c();
+
   SPIFFS.begin();
   attachInterrupt(FM_PIN, isr_flowmeter, FALLING);
   ticker_led.detach();
@@ -211,7 +213,8 @@ void setup() {
   // 1. Connect to WiFi
   ticker_led.attach_ms(500, blink_single_led, LED_PWR);
   WiFi.begin(LOCAL_SSID, LOCAL_PWD);
-  while (WiFi.status() != WL_CONNECTED) { delay(1000); }
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000); }
   #ifdef DEBUG
   Serial.print("Connected, IP address: ");
   Serial.println(WiFi.localIP());
@@ -250,6 +253,10 @@ void setup() {
     query_deployment_configurations(home_url);
     
   } else {
+    // Bring in the configuration information online
+    ticker_led.attach_ms(500, blink_single_led, LED_RDYG);
+    query_deployment_configurations(home_url);
+    
     // 7. Deployment has previously been set, 
     //    configure log file and start logging!
     data_file = "/";
@@ -272,9 +279,6 @@ void setup() {
         rtc.now().unixtime(), DEVICE_ID, eDNA_uid.c_str(), 0);
     data_f.println(f_header);
     data_f.close();
-
-    ticker_led.detach();
-    digitalWrite(LED_RDYG, HIGH);
     
     // 1Hz data logging
     ticker.attach_ms(1000, data_log);
@@ -282,9 +286,10 @@ void setup() {
     dive_start = rtc.now().unixtime(); // Debugging purpose
     #endif
   }
-
-
+  ticker_led.detach();
+  digitalWrite(LED_RDYG, HIGH);
 }
+
 
 /***********************************************************
  * 
@@ -323,7 +328,7 @@ void loop() {
 
    // At 5m, we turn off LEDs
    if (!submerged && p_sensor.depth() > 5) {
-     // digitalWrite(LED, LOW);
+      digitalWrite(LED_RDYG, LOW);
      dive_start = t_data;
      submerged = 1;
    }
@@ -436,6 +441,7 @@ void setup_i2c() {
   #endif
 
   // Pressure sensor
+  #ifdef IS_MS5837
   while (!p_sensor.init()) {
     #ifdef DEBUG
     Serial.println("pressure waiting...");
@@ -443,6 +449,10 @@ void setup_i2c() {
 
     delay(1000); 
   }  
+  #else
+  p_sensor.init();
+  #endif
+  
   // Temperature sensor
   c_sensor.init();
   
@@ -538,6 +548,9 @@ void upload_existing_data(String home_url) {
     uint16_t f_size = dir.fileSize();
     // We need to turn data into multiple chunks
     uint8_t n_chunks = f_size / CHUNK_SIZE + 1;
+    Serial.println(CHUNK_SIZE);
+    Serial.println(f_size);
+    Serial.println(n_chunks);
     
     if (WiFi.status() == WL_CONNECTED) {
       HTTPClient http;
@@ -562,6 +575,7 @@ void upload_existing_data(String home_url) {
         // Persistent request to upload the file
         while (httpCode != 200) {
           httpCode = http.POST(temp_bytes);
+          delay(1000);
         }
         // Reset/update the local parameters
         bytes_read = 0;
@@ -579,6 +593,7 @@ void upload_new_deployment(String home_url) {
   if (WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
     String create_url = home_url + "/deployment/create/" + String(DEVICE_ID);
+    Serial.println(DEVICE_ID);
     http.begin(create_url);
     http.addHeader("Content-Type", "text/plain");
     int httpCode = http.POST(eDNA_uid);
@@ -596,14 +611,19 @@ uint8_t check_deployment_status(String home_url) {
     HTTPClient http;
     String check_url = home_url + "/deployment/has_deployment/" + String(DEVICE_ID);
     http.begin(check_url);
-    const size_t buffer_size = JSON_OBJECT_SIZE(2);
+    const size_t buffer_size = JSON_OBJECT_SIZE(2) + \
+        JSON_OBJECT_SIZE(3) + JSON_OBJECT_SIZE(5) + JSON_OBJECT_SIZE(8) + 370;
     DynamicJsonDocument jsonBuffer(buffer_size);
     int httpCode = http.GET();
     if (httpCode > 0) {
+      Serial.println(http.getString());
       deserializeJson(jsonBuffer, http.getString());
       deployment_status = jsonBuffer["status"];
+      Serial.println(deployment_status);
       if (deployment_status == DEPLOYMENT_RDY) {
         eDNA_uid = jsonBuffer["eDNA_UID"].as<String>();
+        Serial.print("ujid:");
+        Serial.println(eDNA_uid);
       }
     }
   }
