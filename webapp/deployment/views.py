@@ -87,6 +87,10 @@ def upload_deployment_data(request, uid):
             num_bytes = int(request.headers["Data-Bytes"])
             nth_chunk = int(request.headers["Nth"])
             parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            print(n_chunks)
+            print(nth_chunk)
+            print(num_bytes)
+            
             if (nth_chunk < n_chunks):
             # Accumulate data first
                 file_name = "{}_{}.txt".format(deployment.eDNA_UID, nth_chunk)
@@ -140,15 +144,19 @@ def create_deployment(request, device_id):
             deployment.save()
         return HttpResponse(status=200)
 
-def check_deployment(device_id):
+def check_deployment(request, device_id):
     if request.method == "GET":
-        device = Device.objects.get_object_or_404(device_id = device_id)
-        deployment = Deployment.objects.filter(device=device, is_new=True).order_by('deployment_date').first()
         data = {}
-        if deployment:
-            data['status'] = 1
-            data['eDNA_UID'] = deployment.eDNA_UID
-        else:
+        device, device_created = Device.objects.get_or_create(device_id = device_id)
+        if device_created:
             data['status'] = 0
+            device.save()
+        else:
+            deployment = Deployment.objects.filter(device=device, is_new=True).order_by('deployment_date').first()
+            if deployment:
+                data['status'] = 1
+                data['eDNA_UID'] = deployment.eDNA_UID
+            else:
+                data['status'] = 0
         response = JsonResponse(data)
         return response

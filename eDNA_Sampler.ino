@@ -69,7 +69,7 @@
 #include "TSYS01.h"
 
 // Define global parameters 
-#define DEVICE_ID 2             // Hardcoded device ID
+#define DEVICE_ID 3             // Hardcoded device ID
 #define FM_PIN 14               // Flowmeter interrupt pin
 #define PUMP_PIN 12             // GPIO pin to control Vpump
 #define LED_PWR 13              // RED Led
@@ -81,20 +81,22 @@
 #define PUMP_READY 0            // Pump has not yet started
 #define PUMP_RUNNING 1          // Pump is running
 #define PUMP_ENDED 2            // Pump has finished
+#define DEPTH_TRIGGER 3         // pump triggered at depth target
+#define OTHER_TRIGGER 4         // other
 
 #define DEPLOYMENT_NOT_RDY 0    // RFID was not scanned
 #define DEPLOYMENT_RDY 1        // RFID was previously scanned
 // WiFi Configuration
 #define LOCAL_SSID "MIT"      
 #define LOCAL_PWD ""
-#define SERVER_IP "18.21.135.5"
+#define SERVER_IP "18.21.154.34"
 #define WEB_PORT "5000"
 #define CHUNK_SIZE 2048         // Data chunk size for uploading
 
 // Uncomment if using MS5837 pressure sensor
-//#define IS_MS5837 1
+#define IS_MS5837 1
 // Uncomment if want serial output for debugging
-#define DEBUG 1
+//#define DEBUG 1
 // Uncomment if using FTB431 flowmeter (wire one) 
 // Comment if using FTB2003 flowmeter
 #define IS_FTB431 1
@@ -136,6 +138,7 @@ Ticker ticker_led;
 //flags
 volatile uint8_t fLogData = 0;
 volatile uint8_t pump_state = PUMP_READY;
+volatile uint8_t trigger_mode = OTHER_TRIGGER;
 
 // bookkeeping parameters
 uint32_t dive_start, pump_start;
@@ -282,9 +285,10 @@ void setup() {
     
     // 1Hz data logging
     ticker.attach_ms(1000, data_log);
-    #ifdef DEBUG
+//    #ifdef DEBUG
     dive_start = rtc.now().unixtime(); // Debugging purpose
-    #endif
+    submerged = 1;
+//    #endif
   }
   ticker_led.detach();
   digitalWrite(LED_RDYG, HIGH);
@@ -309,7 +313,7 @@ void setup() {
 void loop() {
   if (fLogData == 1) {
     p_sensor.read();
-    uint32_t p_data = (uint32_t) (p_sensor.pressure());
+    uint32_t p_data = (uint32_t) (p_sensor.depth());
     c_sensor.read();
     uint32_t c_data = (uint32_t) (c_sensor.temperature() * 100);
     // Write data to the data log file
@@ -351,19 +355,22 @@ void loop() {
     }
     #else
    // Pump control given based on depth, time and water volume
-    if ((pump_state == PUMP_READY) && 
+    if ((pump_state == PUMP_READY) && (submerged == 1) &&
        ((dive_start + target_pump_wait < t_data) ||
-       (abs(p_data - target_depth) < DEPTH_MARGIN)) {
+       (abs(p_data - target_depth) < DEPTH_MARGIN))) {
+        if (abs(p_data - target_depth) < DEPTH_MARGIN) {
+          trigger_mode = DEPTH_TRIGGER;
+        }
       // TODO: Record the time at which the pump start 
-//      digitalWrite(PUMP_PIN, HIGH);
+      digitalWrite(PUMP_PIN, HIGH);
       pump_start = t_data;
       pump_state = PUMP_RUNNING;
     } else if ((pump_state == PUMP_RUNNING) && 
       ((pump_start + target_flow_duration < t_data) ||
-      (abs(p_data - target_depth) > DEPTH_MARGIN) || 
-      (target_flow_vol > f_data)) {
+      ((trigger_mode == DEPTH_TRIGGER) && (abs(p_data - target_depth) > DEPTH_MARGIN)) || 
+      (target_flow_vol < f_data))) {
       // TODO: Record the time at which the pump ended
-//      digitalWrite(PUMP_PIN, LOW);
+      digitalWrite(PUMP_PIN, LOW);
       pump_state = PUMP_ENDED;
     }
     #endif
