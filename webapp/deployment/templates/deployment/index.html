@@ -9,65 +9,50 @@
 
 <body>
     <div class="content container">      
-            <div class="row" style="margin-top:1em">
-  
+        {% block content %}
+        <div class="row" style="margin-top:1em">
+            
             <h2>Deployments</h2>
             </div>
-            <div class="row">
+            <div class="col-md-6" style="margin-top:1em">
 
             {% if deployment_list %}
             <table class="table">
                 <thead>
-                    <th scope="col">Device No.</th>
-                    <th scope="col">eDNA UID</th>
-                    <th scope="col">Target Depth<br />(m)</th>
-                    <th scope="col">Pump Wait<br />Duraiton(s)</th>
-                    <th scope="col">Flow Volume<br />(clicks)</th>
-                    <th scope="col">Flow Max <br />Duration (s)</th>
-                    <th scope="col">Submit</th>
-                    <th scope="col">Delete</th>
+                    <th style="text-align:center" scope="col">Device No.</th>
+                    <th style="text-align:center" scope="col">eDNA UID</th>
+                    <th style="text-align:center" scope="col">Data</th>
+                    <th style="text-align:center" scope="col">Delete</th>
 
                 </thead>
                 <tbody>
                     {% for deployment in deployment_list %}
 
                     <tr>
-                        <th scope="row">{{deployment.device.device_id}}</th>
-                        <td>
-                            {% if deployment.has_data == True %}
-                            <a href="/deployment/{{ deployment.pk }}">{{ deployment.eDNA_UID }}</a></td>
+                        <td style="text-align:center" scope="row">
+                            {{deployment.device.device_id}}
+                        </td>
+                        <td style="text-align:center">
+                            {% if deployment.has_data == False %}
+                            {{ deployment.eDNA_UID }} (<a href="/deployment/{{ deployment.eDNA_UID }}">edit</a>)
                             {% else %}
-                            {{ deployment.eDNA_UID }}
+                            {{ deployment.eDNA_UID }} (<a href="/deployment/{{ deployment.eDNA_UID }}">view</a>)
                             {% endif %}
-                        <form action="/deployment/{{ deployment.eDNA_UID }}", method="post">
-                            {% csrf_token %}
-                            <td>
-                                <input id="depth" type="text" name="depth" value="{{ deployment.depth }}" style="width: 100px">
-                            </td>
-                            <td>
-                                <input id="pump_wait" type="text" name="pump_wait" value="{{ deployment.pump_wait }}" style="width: 100px">
-                            </td>
-                            <td>
-                                <input id="flow_volume" type="text" name="flow_volume" value="{{ deployment.flow_volume }}" style="width: 100px">
-                            </td>
-                            <td>
-                                <input id="flow_duration" type="text" name="flow_duration" value="{{ deployment.flow_duration }}" style="width: 100px">
-                            </td>
-                            <td>
-                                {% if deployment.has_data == False %}
-                                <input type="submit" class="btn btn-primary" value="Submit">
-                                {% else %}
-                                <input type="submit" class="btn btn-primary" value="Submit" disabled="disabled">
-                                {% endif %}
-                            </td>
-                            <td>
-                                {% if deployment.has_data == False %}
+                        </td>
+                        <td style="text-align:center">
+                            {% if deployment.has_data == True %}
+                            <a href="/deployment/data/{{ deployment.eDNA_UID }}">Download</a></td>
+                            {% else %}
+                            No Data
+                            {% endif %}
+                        </td>
+                        <form action="/deployment/delete/{{ deployment.eDNA_UID }}" method="post">
+
+                        <td style="text-align:center">
+                                {% csrf_token %}
                                 <input type="submit" class="btn btn-danger" value="Delete">
-                                {% else %}
-                                <input type="submit" class="btn btn-danger" value="Delete", disabled="disabled">
-                                {% endif %}
-                                </td>
-                        </form>
+                        </td>
+                    </form>
 
                     </tr>
                     {% endfor %}
@@ -78,6 +63,7 @@
                 <p>No deployments are available.</p>
             {% endif %}
         </div>
+        {% endblock %}
     </div>
 </body>
 </html>

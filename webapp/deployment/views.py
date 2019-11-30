@@ -12,7 +12,7 @@ from django.core.exceptions import ObjectDoesNotExist
 
 
 from .models import Device, Deployment
-
+from.forms import DeploymentForm
 
 def index(request):
     deployment_list =  Deployment.objects.order_by('has_data', 'pk')
@@ -21,53 +21,73 @@ def index(request):
     return HttpResponse(template.render(context, request))
 
 
-def detail(request, deployment_id):
-    try:
-        deployment = Deployment.objects.get(pk=deployment_id)
-        response = HttpResponse()
-        response['depth'] = deployment.depth
-        response['pump_wait'] = deployment.pump_wait
-        response['flow_volume'] = deployment.flow_volume
-        response['flow_duration'] = deployment.flow_duration
-    except Device.DoesNotExist:
-        raise Http404("Deployment does not exist")
-    return render(request, 'deployment/detail.html', {"device": device})
+def detail(request, uid):
+    deployment = get_object_or_404(Deployment, eDNA_UID = uid)
+    page_data = {"saved": False}
 
-
-def set_depth(request, uid):
     if request.method == "POST":
-        deployment = get_object_or_404(Deployment, eDNA_UID = uid)
-        deployment.depth = int(request.POST['depth'])
-        deployment.pump_wait = int(request.POST['pump_wait'])
-        deployment.flow_volume = int(request.POST['flow_volume'])
-        deployment.flow_duration = int(request.POST['flow_duration'])
-        deployment.save()
-        return HttpResponseRedirect(reverse('index', args=()))
-    elif request.method == "GET":
-        deployment = get_object_or_404(Deployment, pk = int(uid))
-        if deployment.has_data:
-            file_name = "{}.txt".format(deployment.eDNA_UID)
-            parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            file_dir = os.path.join(parent_dir, 'eDNA', 'data', file_name)
-            f_open = open(file_dir, 'rb')
-            response = FileResponse(f_open, as_attachment=True)
-            return response #response
+        form = DeploymentForm(request.POST)
+        if form.is_valid():
+            deployment.depth = form.cleaned_data['depth']
+            deployment.depth_band = form.cleaned_data['depth_band']
+            deployment.temperature = form.cleaned_data['temperature']
+            deployment.temp_band = form.cleaned_data['temp_band']
+            deployment.wait_pump_start = form.cleaned_data['wait_pump_start']
+            deployment.flow_volume = form.cleaned_data['flow_volume']
+            deployment.min_flow_rate = form.cleaned_data['min_flow_rate']
+            deployment.wait_pump_end = form.cleaned_data['wait_pump_end']
+            deployment.ticks_per_L = form.cleaned_data['ticks_per_L']
+            deployment.save()
+            page_data["saved"] = True
 
-def get_depth(request, uid):
+    form = DeploymentForm(initial={
+        'depth': deployment.depth,
+        'depth_band': deployment.depth_band,
+        'temperature': deployment.temperature,
+        'temp_band': deployment.temp_band,
+        'wait_pump_start': deployment.wait_pump_start,
+        'flow_volume': deployment.flow_volume,
+        'min_flow_rate': deployment.min_flow_rate,
+        'wait_pump_end': deployment.wait_pump_end,
+    })
+    if deployment.ticks_per_L > 0:
+        form.initial['ticks_per_L'] =  deployment.ticks_per_L
+
+    page_data["form"] = form
+    page_data["deployment"] = deployment
+    return render(request, 'deployment/detail.html', page_data)
+
+def get_data(request, uid):
+    deployment = get_object_or_404(Deployment, eDNA_UID = uid)
+    if deployment.has_data:
+        file_name = "{}.txt".format(deployment.eDNA_UID)
+        parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        file_dir = os.path.join(parent_dir, 'eDNA', 'data', file_name)
+        f_open = open(file_dir, 'rb')
+        response = FileResponse(f_open, as_attachment=True)
+        return response #response
+
+def get_config(request, uid):
     if request.method == "GET":
         deployment = get_object_or_404(Deployment, eDNA_UID = uid)
-        data = {}
-        data['depth'] = deployment.depth
-        data['pump_wait'] = deployment.pump_wait
-        data['flow_volume'] = deployment.flow_volume
-        data['flow_duration'] = deployment.flow_duration
+        data = {
+            'depth': deployment.depth,
+            'depth_band': deployment.depth_band,
+            'temperature': deployment.temperature,
+            'temp_band': deployment.temp_band,
+            'wait_pump_start': deployment.wait_pump_start,
+            'flow_volume': deployment.flow_volume,
+            'min_flow_rate': deployment.min_flow_rate,
+            'wait_pump_end': deployment.wait_pump_end,
+            'ticks_per_L':  deployment.ticks_per_L
+        }
         response = JsonResponse(data)
         return response
 
 
-def delete_deployment(request, deployment_id):
+def delete_deployment(request, uid):
     if request.method == "POST":
-        deployment = get_object_or_404(Deployment, pk=deployment_id)
+        deployment = get_object_or_404(Deployment, eDNA_UID=uid)
         deployment.delete()
         return HttpResponseRedirect(reverse('index', args=()))
 
