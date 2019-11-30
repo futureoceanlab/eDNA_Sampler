@@ -62,6 +62,8 @@
 #include <PN532/PN532/PN532.h>
 #include <PN532/PN532_I2C/PN532_I2C.h>
 #include <ArduinoJson.h>
+#include <limits.h>
+#include <float.h>
 #include "TimeLib.h"
 #include "RTClib.h"
 #include "MS5837.h"
@@ -76,13 +78,13 @@
 #define LED_RDYB 16             // Blue LED
 #define LED_RDYG 15             // Green LED
 #define DEPTH_MARGIN 10         // Target depth margin
+#define MAX_NUM_PUMP 64         // Maximum number of pumps on/off
+#define NUM_FLOW_LOGS 5         // Num data for computing derivate of ticks
 
 // Pump state variables
-#define PUMP_READY 0            // Pump has not yet started
-#define PUMP_RUNNING 1          // Pump is running
-#define PUMP_ENDED 2            // Pump has finished
-#define DEPTH_TRIGGER 3         // pump triggered at depth target
-#define OTHER_TRIGGER 4         // other
+#define PUMP_ON 1               // Pump is on
+
+#define SUBMERGED 1             // Sampler submerged
 
 #define DEPLOYMENT_NOT_RDY 0    // RFID was not scanned
 #define DEPLOYMENT_RDY 1        // RFID was previously scanned
@@ -97,13 +99,17 @@
 #define IS_MS5837 1
 // Uncomment if want serial output for debugging
 //#define DEBUG 1
-// Uncomment if using FTB431 flowmeter (wire one) 
-// Comment if using FTB2003 flowmeter
-#define IS_FTB431 1
 
-// Deployment configuration parameters
-int target_depth=0, target_pump_wait=0;
-int target_flow_vol=0, target_flow_duration=0;
+// user defined deployment configuration variables
+uint32_t u_min_flow_rate = 0;                 // L/min
+uint32_t u_wait_pump_end = UINT_MAX;          // seconds
+uint32_t u_target_flow_vol = UINT_MAX;        // ticks 
+uint32_t u_wait_pump_start = UINT_MAX;        // seconds after dive
+float u_temperature_band = 0.f;              // +/-100deg C pre-specified for maximum range
+float u_target_temperature = FLT_MAX;     // deg Celcius
+uint32_t u_depth_band = 0;                    // meters
+uint32_t u_target_depth = UINT_MAX;           // meters
+uint32_t u_tick_per_L = 0;                    // ticks per Liter
 
 // RFID
 PN532_I2C pn532_i2c(Wire);
@@ -127,6 +133,9 @@ TSYS01 c_sensor;
 // Flowmeter
 volatile uint32_t flow_counter = 0;
 volatile uint32_t f_data = 0;
+uint32_t flow_log[NUM_FLOW_LOGS];
+uint8_t cur_flow_idx = 0;
+float max_flow_rate = 0;
 
 // Flash
 String data_file;
@@ -137,12 +146,14 @@ Ticker ticker_led;
 
 //flags
 volatile uint8_t fLogData = 0;
-volatile uint8_t pump_state = PUMP_READY;
-volatile uint8_t trigger_mode = OTHER_TRIGGER;
+uint8_t fSubmerged = !SUBMERGED;
 
 // bookkeeping parameters
-uint32_t dive_start, pump_start;
-uint8_t submerged = 0;
+uint32_t dive_start = UINT_MAX, pump_start = UINT_MAX;
+uint32_t pump_starts[MAX_NUM_PUMP];
+uint32_t pump_ends[MAX_NUM_PUMP];
+uint8_t pump_idx = 0;
+uint8_t counter = 0;
 
 
 /**
@@ -285,9 +296,9 @@ void setup() {
     
     // 1Hz data logging
     ticker.attach_ms(1000, data_log);
-//    #ifdef DEBUG
+  //  #ifdef DEBUG
     dive_start = rtc.now().unixtime(); // Debugging purpose
-    submerged = 1;
+    fSubmerged = SUBMERGED;
 //    #endif
   }
   ticker_led.detach();
@@ -315,7 +326,7 @@ void loop() {
     p_sensor.read();
     uint32_t p_data = (uint32_t) (p_sensor.depth());
     c_sensor.read();
-    uint32_t c_data = (uint32_t) (c_sensor.temperature() * 100);
+    float c_data = c_sensor.temperature();
     // Write data to the data log file
     if (SPIFFS.exists(data_file)) {
       // TODO: Need to update number of entries
@@ -330,52 +341,75 @@ void loop() {
       f.close();
     }
 
-   // At 5m, we turn off LEDs
-   if (!submerged && p_sensor.depth() > 5) {
-      digitalWrite(LED_RDYG, LOW);
-     dive_start = t_data;
-     submerged = 1;
-   }
+    flow_log[cur_flow_idx] = f_data;
+    cur_flow_idx = (cur_flow_idx + 1) % NUM_FLOW_LOGS;
 
-    #ifdef DEBUG
-    // Pump control given based on depth, time and water volume
-    if ((pump_state == PUMP_READY) && 
-       (dive_start + target_pump_wait < t_data)) {
-      // TODO: Record the time at which the pump start 
-      Serial.println("Pump ON");
-//      digitalWrite(PUMP_PIN, HIGH);
-      pump_start = t_data;
-      pump_state = PUMP_RUNNING;
-    } else if ((pump_state == PUMP_RUNNING) && 
-      (pump_start + target_flow_duration < t_data)) {
-      Serial.println("Pump OFF");
-      // TODO: Record the time at which the pump ended
-//      digitalWrite(PUMP_PIN, LOW);
-      pump_state = PUMP_ENDED;
+    // At 5m, we turn off LEDs
+    if (fSubmerged != SUBMERGED && p_sensor.depth() > 5) {
+      digitalWrite(LED_RDYG, LOW);
+      dive_start = t_data;
+      fSubmerged = SUBMERGED;
     }
-    #else
-   // Pump control given based on depth, time and water volume
-    if ((pump_state == PUMP_READY) && (submerged == 1) &&
-       ((dive_start + target_pump_wait < t_data) ||
-       (abs(p_data - target_depth) < DEPTH_MARGIN))) {
-        if (abs(p_data - target_depth) < DEPTH_MARGIN) {
-          trigger_mode = DEPTH_TRIGGER;
+    
+    if (fSubmerged) {
+      uint8_t pump_action = check_conditions(p_data, c_data, t_data, f_data);
+      if (pump_action = PUMP_ON) {
+        // Measure the maximum flowrate after 5 seconds of pump start
+        // on the first pump start (in L/min)
+        if (pump_idx == 0) {
+          if (counter == 5) {
+            max_flow_rate = (f_data - flow_log[cur_flow_idx]) * 12;
+          }
+          counter++;
         }
-      // TODO: Record the time at which the pump start 
-      digitalWrite(PUMP_PIN, HIGH);
-      pump_start = t_data;
-      pump_state = PUMP_RUNNING;
-    } else if ((pump_state == PUMP_RUNNING) && 
-      ((pump_start + target_flow_duration < t_data) ||
-      ((trigger_mode == DEPTH_TRIGGER) && (abs(p_data - target_depth) > DEPTH_MARGIN)) || 
-      (target_flow_vol < f_data))) {
-      // TODO: Record the time at which the pump ended
-      digitalWrite(PUMP_PIN, LOW);
-      pump_state = PUMP_ENDED;
+        pump_start = t_data;
+        if (pump_idx < MAX_NUM_PUMP){
+          pump_starts[pump_idx] = pump_start;
+        }
+        digitalWrite(PUMP_PIN, HIGH);
+      } else {
+        if (pump_idx < MAX_NUM_PUMP) {
+          pump_ends[pump_idx] = t_data;
+          pump_idx++;
+        }
+        digitalWrite(PUMP_PIN, LOW);
+      }
     }
-    #endif
     fLogData = 0; 
   }
+}
+
+
+uint8_t check_conditions(uint32_t depth, float temperature, uint32_t time_now, uint32_t ticks) {
+  uint8_t n_start_cond = 3, n_end_cond = 3;
+  uint8_t start_conditions[n_start_cond];
+  uint8_t end_conditions[n_end_cond];
+
+  // Depth
+  start_conditions[0] = abs(depth - u_target_depth) < u_depth_band;
+  // Temperature
+  start_conditions[1] = abs(temperature - u_target_temperature) < u_temperature_band;
+  // Time elapsed since dive start
+  start_conditions[2] = (time_now - dive_start) > u_wait_pump_start;
+
+  // Volume pumped
+  end_conditions[0] = ticks > u_target_flow_vol;
+  // Pump duration 
+  end_conditions[1] = (time_now - pump_start) > u_wait_pump_end;
+  // Flowrate
+  uint32_t cur_fr = (ticks - flow_log[cur_flow_idx]) * 12; // ticks per minute
+  // flowrate below 20% of original flowrate
+  end_conditions[2] = ((u_min_flow_rate * u_ticks_per_L) > cur_fr )
+                      || (max_flow_rate > 5 * cur_fr); 
+
+  uint8_t pump_on = 0;
+  for (uint8_t i = 0; i < n_start_cond; i++) {
+    pump_on += start_conditions[i];
+  }
+  for (uint8_t j = 0; j < n_end_cond; j++) {
+    pump_on *= !(end_conditions[i]);
+  }
+  return pump_on;
 }
 
 
@@ -411,15 +445,6 @@ void blink_all() {
 
 void blink_single_led(int led) {
   digitalWrite(led, !(digitalRead(led)));
-}
-
-uint32_t convert_ml_to_ticks(uint32_t ml) {
-  #ifdef IS_FTB431
-  uint32_t ticks = (uint32_t)((float) ml / 0.36705f);
-  #else // FTB2003
-  uint32_t ticks = (uint32_t)((float) ml) / 4600);
-  #endif
-  return ticks;
 }
 
 
@@ -640,7 +665,7 @@ uint8_t check_deployment_status(String home_url) {
 void query_deployment_configurations(String home_url) {
   if (WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
-    String info_url = home_url + "/deployment/get_depth/" + eDNA_uid;
+    String info_url = home_url + "/deployment/get_config/" + eDNA_uid;
     // Keep trying at 1Hz until all of the parameters are configured for deployment
     while (target_depth == 0 || target_pump_wait == 0 \
     || target_flow_vol == 0 || target_flow_duration == 0 ) {
@@ -658,10 +683,17 @@ void query_deployment_configurations(String home_url) {
         #endif
 
         // Parameters for deployment configuration
-        target_depth = jsonBuffer["depth"];
-        target_pump_wait = jsonBuffer["pump_wait"];
-        target_flow_vol = convert_ml_to_ticks(jsonBuffer["flow_volume"]);
-        target_flow_duration = jsonBuffer["flow_duration"];
+        u_target_depth = jsonBuffer["depth"];
+        u_depth_band = jsonBuffer["depth_band"];
+        u_target_temperature = jsonBuffer["temperature"];
+        u_temperature_band = jsonBuffer["temp_band"];
+        u_wait_pump_start = jsonBuffer["wait_pump_start"];
+
+        u_min_flow_rate = jsonBuffer["min_flow_rate"]; // L/min
+        u_wait_pump_end = jsonBuffer["wait_pump_end"];
+        u_target_flow_vol = jsonBuffer["flow_volume"] * u_ticks_per_L; // ticks
+        u_ticks_per_L = jsonBufferp["ticks_per_L"];
+
         http.end();
         delay(1000);
       }
