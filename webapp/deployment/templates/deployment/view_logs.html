@@ -1,0 +1,24 @@
+{% extends 'deployment/index.html' %}
+{% block content %}
+
+<div class="row" style="margin-top:1em">
+    <h2>Logs</h2>
+</div>
+<div class="row">
+    <p>
+    {% if logs_list %}
+        {% for log in logs_list %}
+        <a href="/deployment/get_log/{{log}}">{{log}}</a><br>
+        {% endfor %}
+    {% else %}
+
+    No logs available
+    {% endif %}
+    </p>
+</div>
+<div class="row">
+    <a href="/deployment" class="btn btn-secondary">
+        Back
+    </a>    
+</div>
+{% endblock %}

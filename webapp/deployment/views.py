@@ -20,6 +20,12 @@ def index(request):
     template = loader.get_template('deployment/index.html')
     return HttpResponse(template.render(context, request))
 
+def handle_logs(request):
+    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    file_path = os.path.join(parent_dir, 'eDNA', 'logs')
+    logs_list = [f.split('.')[0] for f in os.listdir(file_path) if os.path.isfile(os.path.join(file_path, f))]
+    context = {'logs_list': logs_list}
+    return render(request, 'deployment/view_logs.html', context)
 
 def detail(request, uid):
     deployment = get_object_or_404(Deployment, eDNA_UID = uid)
@@ -38,7 +44,9 @@ def detail(request, uid):
             deployment.wait_pump_end = form.cleaned_data['wait_pump_end']
             deployment.ticks_per_L = form.cleaned_data['ticks_per_L']
             deployment.save()
-            page_data["saved"] = True
+            page_data["saved"] = 1
+        else:
+            page_data["saved"] = 2
 
     form = DeploymentForm(initial={
         'depth': deployment.depth,
@@ -67,6 +75,16 @@ def get_data(request, uid):
         response = FileResponse(f_open, as_attachment=True)
         return response #response
 
+def get_log(request, log_name):
+    file_name = "{}.txt".format(log_name)
+    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    file_dir = os.path.join(parent_dir, 'eDNA', 'logs', file_name)
+    if (not os.path.exists(file_dir)):
+        return Http404("Log file does not exist")
+    f_open = open(file_dir, 'rb')
+    response = FileResponse(f_open, as_attachment=True)
+    return response #response
+
 def get_config(request, uid):
     if request.method == "GET":
         deployment = get_object_or_404(Deployment, eDNA_UID = uid)
@@ -77,7 +95,7 @@ def get_config(request, uid):
             'temp_band': deployment.temp_band,
             'wait_pump_start': deployment.wait_pump_start,
             'flow_volume': deployment.flow_volume,
-            'min_flow_rate': deployment.min_flow_rate,
+            'min_flowrate': deployment.min_flow_rate,
             'wait_pump_end': deployment.wait_pump_end,
             'ticks_per_L':  deployment.ticks_per_L
         }
@@ -145,6 +163,51 @@ def upload_deployment_data(request, uid):
     else:
         raise Http404("Invalid Post requst to deployment")
 
+@csrf_exempt
+def upload_log(request, device_id):
+    if request.method == "POST":
+        n_chunks = int(request.headers["Chunks"])
+        num_bytes = int(request.headers["Data-Bytes"])
+        nth_chunk = int(request.headers["Nth"])
+        parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        print(n_chunks)
+        print(nth_chunk)
+        print(num_bytes)
+            
+        if (nth_chunk < n_chunks):
+        # Accumulate data first
+            file_name = "temp_log_{}.txt".format(nth_chunk)
+            new_file = os.path.join(parent_dir, 'eDNA', 'logs', file_name)
+            with open(new_file, 'wb+') as dest:
+                dest.write(request.body[0:num_bytes])
+        elif (nth_chunk == n_chunks):
+            # Check that all the intermediate files exist
+            for i in range(1, n_chunks):
+                file_name = "temp_log_{}.txt".format(i)
+                file_path = os.path.join(parent_dir, 'eDNA', 'logs', file_name)
+                if not os.path.exists(file_path):
+                    print("file not exists")
+                    raise Http404("Missing intermediate files, send again")
+            # create the final file
+            datetime_now = time.strftime("%Y%m%d%H%M")
+            final_file_name = "log_{}_{}.txt".format(device_id, datetime_now)
+            new_file = os.path.join(parent_dir, 'eDNA', 'logs', final_file_name)
+            # read from all the intermediate files upon which they are erased
+            with open(new_file, 'wb+') as dest:
+                for i in range(1, n_chunks):
+                    file_name = "temp_log_{}.txt".format(i)
+                    file_path = os.path.join(parent_dir, 'eDNA', 'logs', file_name)
+                    with open(file_path, 'rb') as temp_f:
+                        dest.write(temp_f.read())
+                    os.remove(file_path)
+                dest.write(request.body[0:num_bytes])
+            print("Done")
+        else:
+            raise Http404("Unexpected nth chunk")
+        return HttpResponse(status=200)
+
+    else:
+        raise Http404("Invalid Post requst to deployment")
 
 @csrf_exempt
 def create_deployment(request, device_id):

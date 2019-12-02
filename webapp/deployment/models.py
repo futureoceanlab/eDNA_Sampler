@@ -1,10 +1,10 @@
 from django.db import models
 from django.utils import timezone
 
+absolute_zero_C = -273.15
 
 class Device(models.Model):
     device_id = models.IntegerField()
-
 
     def __str__(self):
         return str(self.device_id)
@@ -19,12 +19,12 @@ class Deployment(models.Model):
 
     depth = models.IntegerField(default=0)
     depth_band = models.IntegerField(default=0)
-    temperature = models.FloatField(default=0)
+    temperature = models.FloatField(default=absolute_zero_C)
     temp_band = models.FloatField(default=0)
 
     wait_pump_start = models.IntegerField(default=0)
-    flow_volume = models.IntegerField(default=0)
-    min_flow_rate = models.IntegerField(default=0)
+    flow_volume = models.FloatField(default=0)
+    min_flow_rate = models.FloatField(default=0)
     wait_pump_end = models.IntegerField(default=0)
 
     ticks_per_L = models.IntegerField(default=0)
