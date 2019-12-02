@@ -71,7 +71,7 @@
 #include "TSYS01.h"
 
 // Define global parameters 
-#define DEVICE_ID 3             // Hardcoded device ID
+#define DEVICE_ID 1             // Hardcoded device ID
 #define FM_PIN 14               // Flowmeter interrupt pin
 #define PUMP_PIN 12             // GPIO pin to control Vpump
 #define LED_PWR 13              // RED Led
@@ -80,9 +80,16 @@
 #define DEPTH_MARGIN 10         // Target depth margin
 #define MAX_NUM_PUMP 64         // Maximum number of pumps on/off
 #define NUM_FLOW_LOGS 5         // Num data for computing derivate of ticks
+#define ABS_ZERO_C -273.15f
+
+#define N_START_COND 3          // Number of pump starting conditions
+#define N_END_COND 3            // Number of pump ending conditions
 
 // Pump state variables
+#define PUMP_OFF 0              // Pump is off
 #define PUMP_ON 1               // Pump is on
+#define PUMP_IDLE 2
+#define PUMP_RUNNING 3
 
 #define SUBMERGED 1             // Sampler submerged
 
@@ -91,25 +98,38 @@
 // WiFi Configuration
 #define LOCAL_SSID "MIT"      
 #define LOCAL_PWD ""
-#define SERVER_IP "18.21.154.34"
+#define SERVER_IP "18.21.130.198"
 #define WEB_PORT "5000"
 #define CHUNK_SIZE 2048         // Data chunk size for uploading
 
 // Uncomment if using MS5837 pressure sensor
-#define IS_MS5837 1
+//#define IS_MS5837 1
+#ifdef IS_MS5837
+#define MAX_DEPTH 300
+#else
+#define MAX_DEPTH 1000
+#endif
+#define MAX_TEMP 125.0f
+
 // Uncomment if want serial output for debugging
-//#define DEBUG 1
+#define DEBUG 1
 
 // user defined deployment configuration variables
-uint32_t u_min_flow_rate = 0;                 // L/min
+float u_min_flowrate = 0;                    // L/min
 uint32_t u_wait_pump_end = UINT_MAX;          // seconds
-uint32_t u_target_flow_vol = UINT_MAX;        // ticks 
+uint32_t u_target_flow_vol = UINT_MAX;            // ticks 
 uint32_t u_wait_pump_start = UINT_MAX;        // seconds after dive
-float u_temperature_band = 0.f;              // +/-100deg C pre-specified for maximum range
-float u_target_temperature = FLT_MAX;     // deg Celcius
+float u_temperature_band = 0.f;               // +/-100deg C pre-specified for maximum range
+float u_target_temperature = -273.15;         // deg Celcius
 uint32_t u_depth_band = 0;                    // meters
-uint32_t u_target_depth = UINT_MAX;           // meters
-uint32_t u_tick_per_L = 0;                    // ticks per Liter
+int32_t u_target_depth = INT_MAX;           // meters
+uint32_t u_ticks_per_L = 0;                   // ticks per Liter
+
+// deployment conditions
+uint8_t start_conditions[N_START_COND];
+uint8_t end_conditions[N_END_COND];
+uint8_t start_cond_mask[N_END_COND];
+uint8_t end_cond_mask[N_START_COND];
 
 // RFID
 PN532_I2C pn532_i2c(Wire);
@@ -133,12 +153,14 @@ TSYS01 c_sensor;
 // Flowmeter
 volatile uint32_t flow_counter = 0;
 volatile uint32_t f_data = 0;
-uint32_t flow_log[NUM_FLOW_LOGS];
+uint32_t flow_log[NUM_FLOW_LOGS] = {0};
 uint8_t cur_flow_idx = 0;
-float max_flow_rate = 0;
+float max_flowrate = 0.f;
+float cur_flowrate = 0.f;
 
 // Flash
 String data_file;
+String log_file = "/log.txt";
 
 // Timer for 1Hz log / LED
 Ticker ticker;
@@ -150,9 +172,7 @@ uint8_t fSubmerged = !SUBMERGED;
 
 // bookkeeping parameters
 uint32_t dive_start = UINT_MAX, pump_start = UINT_MAX;
-uint32_t pump_starts[MAX_NUM_PUMP];
-uint32_t pump_ends[MAX_NUM_PUMP];
-uint8_t pump_idx = 0;
+uint8_t pump_status = PUMP_IDLE;
 uint8_t counter = 0;
 
 
@@ -179,6 +199,10 @@ void setup_i2c(void);
 // Wait for RFID to be read and set the eDNA_uid
 void wait_RFID(void);
 
+// check the condition of starting and ending the pump
+uint8_t check_conditions(uint32_t depth, float temperature, uint32_t time_now, uint32_t ticks);
+// Check validity of deployment configuration
+uint8_t is_valid_user_configuration(void);
 // synchornize the RTC with the time of the webserver
 void synchronize_rtc(String home_url);
 // Upload data file, broken into chunks, to the webserver
@@ -189,6 +213,10 @@ uint8_t check_deployment_status(String home_url);
 void upload_new_deployment(String home_url);
 // Query the deployment configuration from the webserver
 void query_deployment_configurations(String home_url);
+
+// log file operation
+void log_line(String log_data);
+void upload_log(String home_url);
 
 /***********************************************************
  * 
@@ -209,14 +237,15 @@ void setup() {
   #ifdef DEBUG
   Serial.begin(9600);
   #endif
+ 
   // 0. setup GPIO pins, i2c, filesystem and isr
   // Blink all LEDs while hardware getting ready
   ticker_led.attach_ms(500, blink_all);
+  SPIFFS.begin();
 
   setup_pins();
   setup_i2c();
-
-  SPIFFS.begin();
+  
   attachInterrupt(FM_PIN, isr_flowmeter, FALLING);
   ticker_led.detach();
   // Turn off all LEDs
@@ -227,12 +256,21 @@ void setup() {
   // 1. Connect to WiFi
   ticker_led.attach_ms(500, blink_single_led, LED_PWR);
   WiFi.begin(LOCAL_SSID, LOCAL_PWD);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(1000); }
+  uint8_t wifi_attempt = 0;
+  while ((WiFi.status() != WL_CONNECTED) && (wifi_attempt < 10)) {
+    delay(1000); 
+  }
+  if (wifi_attempt == 10) {
+    ticker_led.attach_ms(500, blink_all);
+    log_line("Wifi connection failed after 10 attempts!");
+    while(1);
+  }
+
   #ifdef DEBUG
   Serial.print("Connected, IP address: ");
   Serial.println(WiFi.localIP());
   #endif
+  log_line("Connected to WiFi.");
 
   String home_url = get_home_url();
 
@@ -243,17 +281,24 @@ void setup() {
   upload_existing_data(home_url);
   ticker_led.detach();
   digitalWrite(LED_PWR, LOW);
+  log_line("Uploaded data to webserver");
 
   // 4. Check if deployment is setup online
   // check_deployment_status() will set the eDNA_UID shared variable
   uint8_t deployment_status = check_deployment_status(home_url);
 
   if (deployment_status != DEPLOYMENT_RDY) {
+
     // 4. Scan RFID 
     nfc.begin();
+    upload_log(home_url);
+    log_line("LOG START...");
+    
     #ifdef DEBUG
     Serial.println("NFC connected");
     #endif
+    log_line("RFID reader initialized.");
+
     ticker_led.attach_ms(500, blink_single_led, LED_RDYB);
     wait_RFID();
     
@@ -286,9 +331,12 @@ void setup() {
       #ifdef DEBUG
       Serial.println("Failed to open new file");
       #endif
+      log_line("Opening data file failed!");
+      ticker_led.attach_ms(500, blink_all);
+      while(1);
     }
     // First line of the file [time, device id, uid, num_entries]
-    char f_header[100];
+    char f_header[100], f_deployment[100];
     sprintf(f_header, "%d,%d,%s,%d", \
         rtc.now().unixtime(), DEVICE_ID, eDNA_uid.c_str(), 0);
     data_f.println(f_header);
@@ -296,10 +344,11 @@ void setup() {
     
     // 1Hz data logging
     ticker.attach_ms(1000, data_log);
-  //  #ifdef DEBUG
+    #ifdef DEBUG
     dive_start = rtc.now().unixtime(); // Debugging purpose
     fSubmerged = SUBMERGED;
-//    #endif
+    #endif
+    log_line("Setup complete - Start logging data!");
   }
   ticker_led.detach();
   digitalWrite(LED_RDYG, HIGH);
@@ -323,26 +372,31 @@ void setup() {
  */
 void loop() {
   if (fLogData == 1) {
+    flow_log[cur_flow_idx] = f_data;
+    cur_flow_idx = (cur_flow_idx + 1) % NUM_FLOW_LOGS;
+    // average the flow across 5 seconds of accumulated ticks
+    cur_flowrate = (f_data - flow_log[cur_flow_idx]) * 12.f; // ticks per minute
     p_sensor.read();
-    uint32_t p_data = (uint32_t) (p_sensor.depth());
+    int32_t p_data = (int32_t) (p_sensor.depth());
     c_sensor.read();
     float c_data = c_sensor.temperature();
+
     // Write data to the data log file
     if (SPIFFS.exists(data_file)) {
       // TODO: Need to update number of entries
       File f = SPIFFS.open(data_file, "a+");
       f.print(t_data);
       f.print(',');
-      f.print(p_data);
-      f.print(',');
       f.print(f_data);
       f.print(',');
+      f.print(p_data);
+      f.print(',');
       f.println(c_data);
+      f.print(',');
+      f.print(cur_flowrate);
       f.close();
     }
 
-    flow_log[cur_flow_idx] = f_data;
-    cur_flow_idx = (cur_flow_idx + 1) % NUM_FLOW_LOGS;
 
     // At 5m, we turn off LEDs
     if (fSubmerged != SUBMERGED && p_sensor.depth() > 5) {
@@ -353,62 +407,88 @@ void loop() {
     
     if (fSubmerged) {
       uint8_t pump_action = check_conditions(p_data, c_data, t_data, f_data);
-      if (pump_action = PUMP_ON) {
+      #ifdef DEBUG
+      Serial.println(pump_action);
+      #endif
+      if (pump_status == PUMP_IDLE && pump_action == PUMP_ON) {
         // Measure the maximum flowrate after 5 seconds of pump start
-        // on the first pump start (in L/min)
-        if (pump_idx == 0) {
-          if (counter == 5) {
-            max_flow_rate = (f_data - flow_log[cur_flow_idx]) * 12;
-          }
-          counter++;
-        }
+        // on the first pump start (in ticks/min)
         pump_start = t_data;
-        if (pump_idx < MAX_NUM_PUMP){
-          pump_starts[pump_idx] = pump_start;
-        }
+        File f = SPIFFS.open(data_file, "a+");
+        log_line("PUMP ON!");
         digitalWrite(PUMP_PIN, HIGH);
-      } else {
-        if (pump_idx < MAX_NUM_PUMP) {
-          pump_ends[pump_idx] = t_data;
-          pump_idx++;
-        }
+        pump_status = PUMP_RUNNING;
+      } else if (pump_status == PUMP_RUNNING && pump_action == PUMP_OFF) {
+        File f = SPIFFS.open(data_file, "a+");
+        log_line("PUMP OFF!");
         digitalWrite(PUMP_PIN, LOW);
+        pump_status = PUMP_IDLE;
       }
-    }
+      // After 10 seconds, measure the maximum flowrate
+      if (pump_status == PUMP_RUNNING && counter < 10) {
+        counter++;
+        if (counter == 10) {
+          max_flowrate = (f_data - flow_log[cur_flow_idx]) * 12;
+        }
+      }
+  }
     fLogData = 0; 
   }
 }
 
 
-uint8_t check_conditions(uint32_t depth, float temperature, uint32_t time_now, uint32_t ticks) {
-  uint8_t n_start_cond = 3, n_end_cond = 3;
-  uint8_t start_conditions[n_start_cond];
-  uint8_t end_conditions[n_end_cond];
+uint8_t is_valid_user_configuration() {
+  // 0. depth
+  start_cond_mask[0] = ((u_target_depth > 0) 
+                     && (u_target_depth < MAX_DEPTH) 
+                     && (u_depth_band > 0));
+  // 1. temperature
+  start_cond_mask[1] = ((u_target_temperature > ABS_ZERO_C) 
+              && (u_target_temperature < MAX_TEMP) 
+              && (u_temperature_band > 0.f));
+  // 2. Wait duration after dive started
+  start_cond_mask[2] = u_wait_pump_start > 0 && u_wait_pump_start < UINT_MAX;
 
-  // Depth
-  start_conditions[0] = abs(depth - u_target_depth) < u_depth_band;
-  // Temperature
-  start_conditions[1] = abs(temperature - u_target_temperature) < u_temperature_band;
-  // Time elapsed since dive start
-  start_conditions[2] = (time_now - dive_start) > u_wait_pump_start;
+  // 0. Pump volume
+  end_cond_mask[0] = u_target_flow_vol > 0 && u_target_flow_vol < UINT_MAX;
+  // 1. Pump duration
+  end_cond_mask[1] = u_wait_pump_end > 0 && u_wait_pump_end < UINT_MAX;
+  // 2. Minimum Flowrate until stop
+  end_cond_mask[2] = u_min_flowrate > 0.f;
 
-  // Volume pumped
+  uint8_t is_valid_fm = u_ticks_per_L > 0;
+  uint8_t is_valid_start = 0, is_valid_end = 0;
+  for (uint8_t i = 0; i < N_START_COND; i++) {
+    is_valid_start |= start_cond_mask[i];
+    is_valid_end |= end_cond_mask[i];
+  }
+  return is_valid_fm & is_valid_start & is_valid_end; 
+}
+
+uint8_t check_conditions(int32_t depth, float temperature, uint32_t time_now, uint32_t ticks) {
+  // 0. Depth
+  start_conditions[0] = (abs(depth - u_target_depth)) < u_depth_band;
+  // 1. Temperature
+  start_conditions[1] = (abs(temperature - u_target_temperature)) < u_temperature_band;
+  // 2. Time elapsed since dive start
+  start_conditions[2] = (dive_start <= time_now) && ((time_now - dive_start) > u_wait_pump_start);
+
+  // 0. Volume pumped
   end_conditions[0] = ticks > u_target_flow_vol;
-  // Pump duration 
-  end_conditions[1] = (time_now - pump_start) > u_wait_pump_end;
-  // Flowrate
-  uint32_t cur_fr = (ticks - flow_log[cur_flow_idx]) * 12; // ticks per minute
-  // flowrate below 20% of original flowrate
-  end_conditions[2] = ((u_min_flow_rate * u_ticks_per_L) > cur_fr )
-                      || (max_flow_rate > 5 * cur_fr); 
+  // 1. Pump duration 
+  end_conditions[1] = (pump_start <= time_now) && ((time_now - pump_start) > u_wait_pump_end);
+  // 2. Flowrate: flowrate below 20% of original flowrate
+  end_conditions[2] = ((u_min_flowrate * u_ticks_per_L) > cur_flowrate )
+                      || (max_flowrate > 5 * cur_flowrate); 
 
   uint8_t pump_on = 0;
-  for (uint8_t i = 0; i < n_start_cond; i++) {
-    pump_on += start_conditions[i];
+  for (uint8_t j = 0; j < N_START_COND; j++) {
+    pump_on |= start_cond_mask[j] * start_conditions[j];
   }
-  for (uint8_t j = 0; j < n_end_cond; j++) {
-    pump_on *= !(end_conditions[i]);
+  for (uint8_t k = 0; k < N_END_COND; k++) {
+    pump_on &= !(end_cond_mask[k] * end_conditions[k]);
   }
+  pump_on = pump_on == 0 ? PUMP_OFF : PUMP_ON;
   return pump_on;
 }
 
@@ -463,6 +543,7 @@ void setup_pins() {
   #ifdef DEBUG
   Serial.println("Pins set");
   #endif
+  log_line("Pins setup comlete!");
 }
 
 
@@ -471,31 +552,42 @@ void setup_i2c() {
   #ifdef DEBUG
   Serial.println("Setting up I2C...");
   #endif
+  log_line("Start settup up I2C");
 
   // Pressure sensor
   #ifdef IS_MS5837
-  while (!p_sensor.init()) {
+  uint8_t p_init_attempts = 0;
+  while (!p_sensor.init() && p_init_attempts < 5) {
     #ifdef DEBUG
     Serial.println("pressure waiting...");
     #endif
-
     delay(1000); 
-  }  
+    p_init_attempts++;
+  }
+  if (p_init_attempts == 5) {
+    log_line("Sensor MS5837 setup failed after 5 attempts.");
+    ticker_led.attach_ms(500, blink_all);
+    while(1);
+  }
   #else
   p_sensor.init();
   #endif
-  
+  log_line("Pressure sensor setup successful.");
   // Temperature sensor
   c_sensor.init();
-  
+  log_line("Temperature sensor setup successful.");
+
   // Setup RTC
   if (!rtc.begin()) {
     #ifdef DEBUG
-    Serial.println("Couldn't find RTC");
+    Serial.println("Couldn't find RTC.");
     #endif
-
+    log_line("RTC setup failed.");
+    ticker_led.attach_ms(500, blink_all);
     while (1);
   }
+  log_line("RTC setup successful.");
+
   if (rtc.lostPower()) {
     #ifdef DEBUG
     Serial.println("RTC lost power, lets set the time!");
@@ -506,6 +598,8 @@ void setup_i2c() {
   #ifdef DEBUG
   Serial.println("done I2C");
   #endif
+  log_line("I2C setup complete!");
+
 }
 
 
@@ -547,6 +641,7 @@ void synchronize_rtc(String home_url) {
       #ifdef DEBUG
       Serial.println(t);
       #endif
+      log_line("Synchronized time with the server!");
 
       http.end();
       delay(1000);
@@ -570,6 +665,8 @@ void upload_existing_data(String home_url) {
     Serial.println(f_name);
     #endif
     int idx = f_name.indexOf('.');
+    // We assume that the proper data file name is simply
+    // the uid which has 8 characters (e.g. "/abcdef12.txt")
     if (idx != 9) continue;
 
     // Only upload data of [uid].txt format
@@ -651,24 +748,26 @@ uint8_t check_deployment_status(String home_url) {
       Serial.println(http.getString());
       deserializeJson(jsonBuffer, http.getString());
       deployment_status = jsonBuffer["status"];
-      Serial.println(deployment_status);
       if (deployment_status == DEPLOYMENT_RDY) {
         eDNA_uid = jsonBuffer["eDNA_UID"].as<String>();
-        Serial.print("ujid:");
+        log_line(eDNA_uid);
+        #ifdef DEBUG
+        Serial.print("uid:");
         Serial.println(eDNA_uid);
+        #endif
       }
     }
   }
   return deployment_status;
 }
 
+
 void query_deployment_configurations(String home_url) {
   if (WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
     String info_url = home_url + "/deployment/get_config/" + eDNA_uid;
     // Keep trying at 1Hz until all of the parameters are configured for deployment
-    while (target_depth == 0 || target_pump_wait == 0 \
-    || target_flow_vol == 0 || target_flow_duration == 0 ) {
+    while (!is_valid_user_configuration()) {
       http.begin(info_url);
       // Deserialize Json file
       const size_t bufferSize = JSON_OBJECT_SIZE(2) + \
@@ -683,20 +782,79 @@ void query_deployment_configurations(String home_url) {
         #endif
 
         // Parameters for deployment configuration
-        u_target_depth = jsonBuffer["depth"];
+        u_ticks_per_L = jsonBuffer["ticks_per_L"];
+
+        uint32_t temp_depth = jsonBuffer["depth"];
+        u_target_depth = temp_depth > 0 ? temp_depth : INT_MAX;
         u_depth_band = jsonBuffer["depth_band"];
-        u_target_temperature = jsonBuffer["temperature"];
+        float temp_temperature = jsonBuffer["temperature"];
+        u_target_temperature = temp_temperature > ABS_ZERO_C ? temp_temperature : ABS_ZERO_C;
         u_temperature_band = jsonBuffer["temp_band"];
-        u_wait_pump_start = jsonBuffer["wait_pump_start"];
-
-        u_min_flow_rate = jsonBuffer["min_flow_rate"]; // L/min
-        u_wait_pump_end = jsonBuffer["wait_pump_end"];
-        u_target_flow_vol = jsonBuffer["flow_volume"] * u_ticks_per_L; // ticks
-        u_ticks_per_L = jsonBufferp["ticks_per_L"];
-
+        u_wait_pump_start = jsonBuffer["wait_pump_start"]; // min
+        u_wait_pump_start *= 60; // seconds
+        
+        u_min_flowrate = jsonBuffer["min_flowrate"]; // L/min
+        uint32_t temp_wait_pump_end = jsonBuffer["wait_pump_end"]; // min
+        u_wait_pump_end = temp_wait_pump_end > 0 ? (temp_wait_pump_end * 60) : UINT_MAX; // sec
+        float temp_flow_vol = jsonBuffer["flow_volume"]; // ticks
+        u_target_flow_vol = temp_flow_vol > 0 ? (uint32_t)(temp_flow_vol * u_ticks_per_L) : UINT_MAX;
+       
         http.end();
         delay(1000);
       }
     }
   }
+}
+
+
+void log_line(String log_data) {
+  File log_f = SPIFFS.open(log_file, "a+");
+  log_f.print(rtc.now().unixtime());
+  log_f.print(": ");
+  log_f.println(log_data);
+  log_f.close();
+}
+
+void upload_log(String home_url) {
+  String upload_log_url = home_url + "/deployment/upload-log/" + DEVICE_ID;
+  char temp_bytes[CHUNK_SIZE];
+
+  File cur_file = SPIFFS.open(log_file, "r");;
+  uint16_t f_size = cur_file.size();
+  // We need to turn data into multiple chunks
+  uint8_t n_chunks = f_size / CHUNK_SIZE + 1;
+  
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    http.begin(upload_log_url);
+    http.addHeader("Content-Type", "text/plain");
+    http.addHeader("Chunks", String(n_chunks));
+
+    uint16_t bytes_read = 0;
+    // bookkeeping parameter to let the webserver know how much is left
+    uint8_t nth_chunk = 1;
+    // Upload data until the file is EOF
+    while (cur_file.available()) {
+      // Upload chunk by chunk
+      while (cur_file.available() && bytes_read < CHUNK_SIZE) {
+        temp_bytes[bytes_read] = cur_file.read();
+        bytes_read++;
+      }
+      http.addHeader("Data-Bytes", String(bytes_read));
+      http.addHeader("Nth", String(nth_chunk));
+      int httpCode = http.POST(temp_bytes);
+
+      // Persistent request to upload the file
+      while (httpCode != 200) {
+        httpCode = http.POST(temp_bytes);
+        delay(1000);
+      }
+      // Reset/update the local parameters
+      bytes_read = 0;
+      nth_chunk++;
+    }
+    http.end();
+  }
+  // Delete the uploaded log
+  SPIFFS.remove(log_file);
 }
