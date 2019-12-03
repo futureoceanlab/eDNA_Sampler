@@ -96,9 +96,9 @@
 #define DEPLOYMENT_NOT_RDY 0    // RFID was not scanned
 #define DEPLOYMENT_RDY 1        // RFID was previously scanned
 // WiFi Configuration
-#define LOCAL_SSID "MIT"      
-#define LOCAL_PWD ""
-#define SERVER_IP "18.21.130.198"
+#define LOCAL_SSID "RPI"      
+#define LOCAL_PWD "12345678"
+#define SERVER_IP "192.168.4.1" // for RPI; Junsu comp: "18.21.130.198"
 #define WEB_PORT "5000"
 #define CHUNK_SIZE 2048         // Data chunk size for uploading
 
@@ -240,18 +240,12 @@ void setup() {
  
   // 0. setup GPIO pins, i2c, filesystem and isr
   // Blink all LEDs while hardware getting ready
-  ticker_led.attach_ms(500, blink_all);
+//  ticker_led.attach_ms(500, blink_all);
   SPIFFS.begin();
-
   setup_pins();
-  setup_i2c();
-  
   attachInterrupt(FM_PIN, isr_flowmeter, FALLING);
-  ticker_led.detach();
+//  ticker_led.detach();
   // Turn off all LEDs
-  digitalWrite(LED_PWR, LOW);
-  digitalWrite(LED_RDYB, LOW);
-  digitalWrite(LED_RDYG, LOW);
   
   // 1. Connect to WiFi
   ticker_led.attach_ms(500, blink_single_led, LED_PWR);
@@ -272,6 +266,8 @@ void setup() {
   #endif
   log_line("Connected to WiFi.");
 
+  setup_i2c();
+
   String home_url = get_home_url();
 
   // 2. Synch RTC
@@ -291,7 +287,9 @@ void setup() {
 
     // 4. Scan RFID 
     nfc.begin();
-    upload_log(home_url);
+    if (SPIFFS.exists(log_file)) {
+      upload_log(home_url);
+    }
     log_line("LOG START...");
     
     #ifdef DEBUG
@@ -391,9 +389,9 @@ void loop() {
       f.print(',');
       f.print(p_data);
       f.print(',');
-      f.println(c_data);
+      f.print(c_data);
       f.print(',');
-      f.print(cur_flowrate);
+      f.println(cur_flowrate);
       f.close();
     }
 
@@ -534,6 +532,10 @@ void setup_pins() {
   pinMode(LED_RDYB, OUTPUT);
   pinMode(LED_RDYG, OUTPUT);
 
+  digitalWrite(LED_PWR, LOW);
+  digitalWrite(LED_RDYB, LOW);
+  digitalWrite(LED_RDYG, LOW);
+  
   // GPIO for controlling Power to the pump
   pinMode(PUMP_PIN, OUTPUT);
   digitalWrite(PUMP_PIN, LOW);
