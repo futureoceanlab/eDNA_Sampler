@@ -24,6 +24,14 @@
 {% endif %}
 
 <div class="container" style="margin-top:1em">
+    <div class="col-md-8 col-lg-8"> 
+    <p><strong>Instruction</strong>: 
+        Please specify the pump starting and ending conditions. 
+        If sampling at certain depth or temperature, 
+        indicate the respective bands.
+        The flowmeter details are also required.
+    </p>
+    </div>
 <form action="/deployment/{{deployment.eDNA_UID}}" method="post">
 {% csrf_token %}
 
