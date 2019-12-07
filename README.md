@@ -8,7 +8,13 @@ The program is run on a virtual environment, so install the virtualenv on the ma
 pip3 install virtualenv
 ```
 
-in webapp, enter the following line in the terminal
+In case that the virtualenv is installed in a path that is not listed (i.e. virtualenv will complain saying that there is no such command), please add the following line to the end of ~/.profile 
+
+```bash
+PATH=$PATH:$HOME/.local/bin
+```
+
+in eDNA_Sampler/webapp, enter the following line in the terminal
 
 ```bash
 virtualenv env
@@ -18,8 +24,13 @@ source env/bin/activate
 This should activate the virtual environment, and you are ready to install the required packages
 
 ```bash
-cd webapp
 pip3 install -r requirements.txt
+```
+
+The webserver hosts' IP address can be found at WLAN0 interface by running the following:
+
+```bash
+ifconfig
 ```
 
 In the webapp directory, run the server
@@ -28,11 +39,7 @@ In the webapp directory, run the server
 python3 manage.py runserver 0.0.0.0:5000
 ```
 
-0.0.0.0 will listen to other devices connected through every interfaces. 5000 is the port, and it can be different as long as it does not coincide with other used ports. The webserver hosts' IP address can be found at WLAN0 interface by running the following:
-
-```bash
-ifconfig
-```
+0.0.0.0 will listen to other devices connected through every interfaces. 5000 is the port, and it can be different as long as it does not coincide with other used ports. 
 
 Finally, check the Firewall if the client cannot access the webapp.
 
