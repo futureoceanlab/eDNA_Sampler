@@ -30,6 +30,7 @@ class Deployment(models.Model):
     ticks_per_L = models.IntegerField(default=0)
     has_data = models.BooleanField(default=False)
 
+    notes = models.TextField()
     
     def __str__(self):
         return self.eDNA_UID

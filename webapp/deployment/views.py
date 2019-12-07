@@ -43,6 +43,7 @@ def detail(request, uid):
             deployment.min_flow_rate = form.cleaned_data['min_flow_rate']
             deployment.wait_pump_end = form.cleaned_data['wait_pump_end']
             deployment.ticks_per_L = form.cleaned_data['ticks_per_L']
+            deployment.notes = form.cleaned_data['notes']
             deployment.save()
             page_data["saved"] = 1
         else:
@@ -57,6 +58,7 @@ def detail(request, uid):
         'flow_volume': deployment.flow_volume,
         'min_flow_rate': deployment.min_flow_rate,
         'wait_pump_end': deployment.wait_pump_end,
+        'notes': deployment.notes,
     })
     if deployment.ticks_per_L > 0:
         form.initial['ticks_per_L'] =  deployment.ticks_per_L
@@ -142,7 +144,7 @@ def upload_deployment_data(request, uid):
                     if not os.path.exists(file_path):
                         print("file not exists")
                         raise Http404("Missing intermediate files, send again")
-                final_file_name = "{}.txt".format(deployment.eDNA_UID)
+                final_file_name = "{}.csv".format(deployment.eDNA_UID)
                 new_file = os.path.join(parent_dir, 'eDNA', 'data', final_file_name)
                 with open(new_file, 'wb+') as dest:
                     for i in range(1, n_chunks):
@@ -164,7 +166,7 @@ def upload_deployment_data(request, uid):
         raise Http404("Invalid Post requst to deployment")
 
 @csrf_exempt
-def upload_log(request, device_id):
+def upload_log(request, uid):
     if request.method == "POST":
         n_chunks = int(request.headers["Chunks"])
         num_bytes = int(request.headers["Data-Bytes"])
@@ -190,7 +192,7 @@ def upload_log(request, device_id):
                     raise Http404("Missing intermediate files, send again")
             # create the final file
             datetime_now = time.strftime("%Y%m%d%H%M")
-            final_file_name = "log_{}_{}.txt".format(device_id, datetime_now)
+            final_file_name = "log_{}_{}.txt".format(datetime_now, uid)
             new_file = os.path.join(parent_dir, 'eDNA', 'logs', final_file_name)
             # read from all the intermediate files upon which they are erased
             with open(new_file, 'wb+') as dest:

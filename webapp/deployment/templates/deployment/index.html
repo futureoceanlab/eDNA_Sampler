@@ -31,8 +31,8 @@
                     <th style="text-align:center" scope="col">Device No.</th>
                     <th style="text-align:center" scope="col">eDNA UID</th>
                     <th style="text-align:center" scope="col">Data</th>
+                    <th style="text-align:center" scope="col">Notes</th>
                     <th style="text-align:center" scope="col">Delete</th>
-
                 </thead>
                 <tbody>
                     {% for deployment in deployment_list %}
@@ -55,14 +55,22 @@
                             No Data
                             {% endif %}
                         </td>
-                        <form action="/deployment/delete/{{ deployment.eDNA_UID }}" method="post">
+                        {% if deployment.notes != "Please insert deployment note here" %}
 
+                        <td style="text-align:left">
+                            {{ deployment.notes }}
+                        </td>
+                        {% else %}
+                        <td style="text-align:center">
+                            <span>-</span>
+                        </td>   
+                        {% endif %}
+                        <form action="/deployment/delete/{{ deployment.eDNA_UID }}" method="post">
                         <td style="text-align:center">
                                 {% csrf_token %}
                                 <input type="submit" class="btn btn-danger" value="Delete">
                         </td>
-                    </form>
-
+                        </form>
                     </tr>
                     {% endfor %}
 

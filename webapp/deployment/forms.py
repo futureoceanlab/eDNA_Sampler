@@ -13,6 +13,8 @@ class DeploymentForm(forms.Form):
     
     ticks_per_L = forms.IntegerField(required=True)
 
+    notes = forms.CharField(widget=forms.Textarea(attrs={"rows":5, "cols":40}))
+
     def clean(self):
         data = self.cleaned_data
         filled_depth = not(data['depth'] == 0 and data['depth_band'] == 0)
