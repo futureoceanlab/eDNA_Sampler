@@ -12,7 +12,10 @@ from django.core.exceptions import ObjectDoesNotExist
 
 
 from .models import Device, Deployment
-from.forms import DeploymentForm
+from .forms import DeploymentForm
+
+from .createPlots import createPlot 
+
 
 def index(request):
     deployment_list =  Deployment.objects.order_by('has_data', 'pk')
@@ -142,7 +145,7 @@ def upload_deployment_data(request, uid):
                     if not os.path.exists(file_path):
                         print("file not exists")
                         raise Http404("Missing intermediate files, send again")
-                final_file_name = "{}.txt".format(deployment.eDNA_UID)
+                final_file_name = "{}.csv".format(deployment.eDNA_UID)
                 new_file = os.path.join(parent_dir, 'eDNA', 'data', final_file_name)
                 with open(new_file, 'wb+') as dest:
                     for i in range(1, n_chunks):
@@ -153,12 +156,14 @@ def upload_deployment_data(request, uid):
                         os.remove(file_path)
                     dest.write(request.body[0:num_bytes])
                 print("Done")
+                createPlot(final_file_name)
                 deployment.has_data = True
                 deployment.is_new = False
                 deployment.save()
             else:
                 raise Http404("Unexpected nth chunk")
 
+        
         return HttpResponse(status=200)
     else:
         raise Http404("Invalid Post requst to deployment")
