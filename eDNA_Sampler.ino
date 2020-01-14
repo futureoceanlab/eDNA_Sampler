@@ -71,12 +71,12 @@
 #include "TSYS01.h"
 
 // Define global parameters 
-#define DEVICE_ID 3             // Hardcoded device ID
+#define DEVICE_ID 4             // Hardcoded device ID
 #define FM_PIN 14               // Flowmeter interrupt pin
 #define PUMP_PIN 12             // GPIO pin to control Vpump
-#define LED_PWR 13              // RED Led
+#define LED_PWR 15              // RED Led
 #define LED_RDYB 16             // Blue LED
-#define LED_RDYG 15             // Green LED
+#define LED_RDYG 13             // Green LED
 #define DEPTH_MARGIN 10         // Target depth margin
 #define MAX_NUM_PUMP 64         // Maximum number of pumps on/off
 #define NUM_FLOW_LOGS 5         // Num data for computing derivate of ticks
@@ -98,12 +98,12 @@
 #define DEPLOYMENT_RDY 1        // RFID was previously scanned
 
 // WiFi Configuration
-#define LOCAL_SSID "RPI"        // SSID of the RPI host
-#define LOCAL_PWD "12345678"    // PWD of the RPI host
-#define SERVER_IP "192.168.4.1" // for RPI; Junsu comp: "18.21.130.198"
+#define LOCAL_SSID "MIT"   //"RPI"        // SSID of the RPI host
+#define LOCAL_PWD "" //"12345678"    // PWD of the RPI host
+#define SERVER_IP "18.21.176.213" //"192.168.4.1" //for RPI; Junsu comp: 
 #define WEB_PORT "5000"
 #define CHUNK_SIZE 2048         // Data chunk size for uploading
-#define WIFI_WAIT 20
+#define WIFI_WAIT 20 
 
 // Uncomment if using MS5837 pressure sensor
 #define IS_MS5837 1
@@ -159,7 +159,7 @@ TSYS01 c_sensor;
 
 // Flowmeter
 volatile uint32_t flow_counter = 0;        // flowmeter interrupt update variable
-volatile uint32_t f_data = 0;              // Stamped variable for logging
+volatile uint32_t f_data = 0;              //                                              Stamped variable for logging
 uint32_t flow_log[NUM_FLOW_LOGS] = {0};    // log of flow values for derivative calculation
 float max_flowrate = 0.f;
 float cur_flowrate = 0.f;
@@ -567,7 +567,7 @@ void setup_pins() {
   pinMode(LED_RDYB, OUTPUT);
   pinMode(LED_RDYG, OUTPUT);
 
-  digitalWrite(LED_PWR, LOW);
+  digitalWrite(LED_PWR, HIGH);
   digitalWrite(LED_RDYB, LOW);
   digitalWrite(LED_RDYG, LOW);
   
@@ -591,25 +591,6 @@ void setup_i2c() {
   #endif
   log_line("Start settup up I2C");
 
-  // Pressure sensor
-  #ifdef IS_MS5837
-  uint8_t p_init_attempts = 0;
-  while (!p_sensor.init() && p_init_attempts < 5) {
-    #ifdef DEBUG
-    Serial.println("pressure waiting...");
-    #endif
-    delay(1000); 
-    p_init_attempts++;
-  }
-  if (p_init_attempts == 5) {
-    log_line("Sensor MS5837 setup failed after 5 attempts.");
-    ticker_led.attach_ms(500, blink_all);
-    while(1);
-  }
-  #else
-  p_sensor.init();
-  #endif
-  log_line("Pressure sensor setup successful.");
   // Temperature sensor
   c_sensor.init();
   log_line("Temperature sensor setup successful.");
@@ -635,6 +616,25 @@ void setup_i2c() {
   #ifdef DEBUG
   Serial.println("done I2C");
   #endif
+    // Pressure sensor
+  #ifdef IS_MS5837
+  uint8_t p_init_attempts = 0;
+  while (!p_sensor.init() && p_init_attempts < 5) {
+    #ifdef DEBUG
+    Serial.println("pressure waiting...");
+    #endif
+    delay(1000); 
+    p_init_attempts++;
+  }
+  if (p_init_attempts == 5) {
+    log_line("Sensor MS5837 setup failed after 5 attempts.");
+    ticker_led.attach_ms(500, blink_all);
+    while(1);
+  }
+  #else
+  p_sensor.init();
+  #endif
+  log_line("Pressure sensor setup successful.");
   log_line("I2C setup complete!");
 
 }
@@ -661,6 +661,8 @@ void synchronize_rtc(String home_url) {
   if (WiFi.status() == WL_CONNECTED) {
     time_t t;
     HTTPClient http;
+//    String time_url = home_url + "/has_deployment/2";
+
     String time_url = home_url + "/deployment/datetime/now";
     int httpCode = 0;
     // Persist to get the time on the webserver. 
@@ -673,6 +675,10 @@ void synchronize_rtc(String home_url) {
       // send GET request
       httpCode = http.GET();
       deserializeJson(jsonBuffer, http.getString());
+      #ifdef DEBUG
+      Serial.print(time_url);
+      Serial.println(http.getString());
+      #endif
       t = (time_t) jsonBuffer["now"];
 
       #ifdef DEBUG
@@ -756,21 +762,25 @@ void upload_existing_data(String home_url) {
 
 
 void upload_new_deployment(String home_url) {
-  if (WiFi.status() == WL_CONNECTED) {
-    HTTPClient http;
-    String create_url = home_url + "/deployment/create/" + String(DEVICE_ID);
-    http.begin(create_url);
-    http.addHeader("Content-Type", "text/plain");
-    int httpCode = http.POST(eDNA_uid);
-    // Persistent POST request to create the deployment
-    while (httpCode != 200) {
-      httpCode = http.POST(eDNA_uid);
-    }
+  HTTPClient http;
+  String create_url = home_url + "/deployment/create/" + String(DEVICE_ID);
+  http.begin(create_url);
+  http.addHeader("Content-Type", "text/plain");
+  int httpCode = http.POST(eDNA_uid);
+  // Persistent POST request to create the deployment
+  while (httpCode != 200) {
+    httpCode = http.POST(eDNA_uid);
     #ifdef DEBUG
-    Serial.println("Uploaded a new deployment successfully!");
+    Serial.println("Uploading failed...");
     #endif
-    http.end();
   }
+  #ifdef DEBUG
+  Serial.println("Uploaded a new deployment successfully!");
+  #endif
+  http.end();
+  #ifdef DEBUG
+  Serial.println("Uploaded new dep - out!");
+  #endif
 }
 
 uint8_t check_deployment_status(String home_url) {
@@ -801,47 +811,48 @@ uint8_t check_deployment_status(String home_url) {
 
 
 void query_deployment_configurations(String home_url) {
-  if (WiFi.status() == WL_CONNECTED) {
-    HTTPClient http;
-    String info_url = home_url + "/deployment/get_config/" + eDNA_uid;
-    // Keep trying at 1Hz until all of the parameters are configured for deployment
-    while (!is_valid_user_configuration()) {
-      http.begin(info_url);
-      // Deserialize Json file
-      const size_t bufferSize = JSON_OBJECT_SIZE(2) + \
-        JSON_OBJECT_SIZE(3) + JSON_OBJECT_SIZE(5) + JSON_OBJECT_SIZE(8) + 370;
-      DynamicJsonDocument jsonBuffer(bufferSize);
-      int httpCode = http.GET();
-      if (httpCode > 0) {
-        deserializeJson(jsonBuffer, http.getString());
+  Serial.println("Query new config");
+  Serial.println("I am connected");
+  HTTPClient http;
+  String info_url = home_url + "/deployment/get_config/" + eDNA_uid;
+  // Keep trying at 1Hz until all of the parameters are configured for deployment
+  while (!is_valid_user_configuration()) {
+    http.begin(info_url);
+    // Deserialize Json file
+    const size_t bufferSize = JSON_OBJECT_SIZE(2) + \
+      JSON_OBJECT_SIZE(3) + JSON_OBJECT_SIZE(5) + JSON_OBJECT_SIZE(8) + 370;
+    DynamicJsonDocument jsonBuffer(bufferSize);
+    int httpCode = http.GET();
+    if (httpCode > 0) {
+      deserializeJson(jsonBuffer, http.getString());
 
-        #ifdef DEBUG
-        Serial.println(http.getString());
-        #endif
+      #ifdef DEBUG
+      Serial.println(http.getString());
+      #endif
 
-        // Parameters for deployment configuration
-        u_ticks_per_L = jsonBuffer["ticks_per_L"];
+      // Parameters for deployment configuration
+      u_ticks_per_L = jsonBuffer["ticks_per_L"];
 
-        float temp_depth = jsonBuffer["depth"];
-        u_target_depth = temp_depth > 0 ? temp_depth : FLT_MAX;
-        u_depth_band = jsonBuffer["depth_band"];
-        float temp_temperature = jsonBuffer["temperature"];
-        u_target_temperature = temp_temperature > ABS_ZERO_C ? temp_temperature : ABS_ZERO_C;
-        u_temperature_band = jsonBuffer["temp_band"];
-        u_wait_pump_start = jsonBuffer["wait_pump_start"]; // min
-        u_wait_pump_start *= 60; // seconds
-        
-        u_min_flowrate = jsonBuffer["min_flowrate"]; // L/min
-        uint32_t temp_wait_pump_end = jsonBuffer["wait_pump_end"]; // min
-        u_wait_pump_end = temp_wait_pump_end > 0 ? (temp_wait_pump_end * 60) : UINT_MAX; // sec
-        float temp_flow_vol = jsonBuffer["flow_volume"]; // ticks
-        u_target_flow_vol = temp_flow_vol > 0 ? (uint32_t)(temp_flow_vol * u_ticks_per_L) : UINT_MAX;
-       
-        http.end();
-        delay(1000);
-      }
+      float temp_depth = jsonBuffer["depth"];
+      u_target_depth = temp_depth > 0 ? temp_depth : FLT_MAX;
+      u_depth_band = jsonBuffer["depth_band"];
+      float temp_temperature = jsonBuffer["temperature"];
+      u_target_temperature = temp_temperature > ABS_ZERO_C ? temp_temperature : ABS_ZERO_C;
+      u_temperature_band = jsonBuffer["temp_band"];
+      u_wait_pump_start = jsonBuffer["wait_pump_start"]; // min
+      u_wait_pump_start *= 60; // seconds
+      
+      u_min_flowrate = jsonBuffer["min_flowrate"]; // L/min
+      uint32_t temp_wait_pump_end = jsonBuffer["wait_pump_end"]; // min
+      u_wait_pump_end = temp_wait_pump_end > 0 ? (temp_wait_pump_end * 60) : UINT_MAX; // sec
+      float temp_flow_vol = jsonBuffer["flow_volume"]; // ticks
+      u_target_flow_vol = temp_flow_vol > 0 ? (uint32_t)(temp_flow_vol * u_ticks_per_L) : UINT_MAX;
+     
+      http.end();
+      delay(1000);
     }
   }
+  Serial.println("done query");
 }
 
 

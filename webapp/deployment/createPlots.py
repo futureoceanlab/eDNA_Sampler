@@ -1,13 +1,17 @@
 import matplotlib.pyplot as plt
 import csv
+import os
 
-def createPlot(csvFile):
+def createPlot(fileName):
+	parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+	new_file = os.path.join(parent_dir, 'eDNA', 'data', fileName)
+
 	time = []
 	pressure = []
 	temperature = []
 	clicks = []
 	flowrate = []
-	with open(csvFile, 'r') as file:
+	with open(new_file, 'r') as file:
 		plots = csv.reader(file, delimiter=',')
 		next(plots)
 		for row in plots:
@@ -34,6 +38,6 @@ def createPlot(csvFile):
 		ax[1,1].set_title("Flowrate")
 		ax[1,1].get_xaxis().set_visible(False)
 		ax[1,1].get_yaxis().set_visible(False)
-		plt.savefig("../eDNA/static/plots/"+csvFile.split(".")[0]+".png")
+		plt.savefig(os.path.join(parent_dir, 'eDNA', 'static', 'plots', fileName.split(".")[0]+".png"))
 
 

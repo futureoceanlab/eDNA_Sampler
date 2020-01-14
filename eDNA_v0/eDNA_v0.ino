@@ -34,14 +34,14 @@
 #include "TSYS01.h"
 
 // Define global parameters 
-#define DEVICE_ID 1             // Hardcoded device ID
+#define DEVICE_ID 3             // Hardcoded device ID
 
 // Pin configuration
 #define FM_PIN 14               // Flowmeter interrupt pin
 #define PUMP_PIN 12             // GPIO pin to control Vpump
-#define LED_PWR 13              // RED Led
+#define LED_PWR 15              // RED Led
 #define LED_RDYB 16             // Blue LED
-#define LED_RDYG 15             // Green LED
+#define LED_RDYG 13             // Green LED
 #define NUM_FLOW_LOGS 5         // Num data for computing derivate of ticks
 #define ABS_ZERO_C -273.15f
 
@@ -418,7 +418,9 @@ uint8_t check_conditions(float depth, float temperature, uint32_t time_now, uint
   start_conditions[1] = (abs(temperature - u_target_temperature)) < u_temperature_band;
   // 2. Time elapsed since dive start
   start_conditions[2] = (dive_start <= time_now) && ((time_now - dive_start) > u_wait_pump_start);
-
+  char cond_str[100];
+  sprintf(cond_str, "depth: %.2f/t%.2f/t%.2f/t%d", depth, u_target_depth, u_depth_band, start_conditions[0]);
+  log_line(cond_str);
   // 0. Volume pumped
   end_conditions[0] = ticks > u_target_flow_vol* u_ticks_per_L;
   // 1. Pump duration 
@@ -451,6 +453,7 @@ void data_log() {
 
 static void ICACHE_RAM_ATTR isr_flowmeter() {
   flow_counter++;
+  Serial.println("tick");
 }
 
 
@@ -471,7 +474,7 @@ void setup_pins() {
   pinMode(LED_PWR, OUTPUT);
   pinMode(LED_RDYB, OUTPUT);
   pinMode(LED_RDYG, OUTPUT);
-
+  
   digitalWrite(LED_PWR, LOW);
   digitalWrite(LED_RDYB, LOW);
   digitalWrite(LED_RDYG, LOW);
@@ -520,9 +523,6 @@ void setup_i2c() {
     // following line sets the RTC to the date & time this sketch was compiled
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   }
-  #ifdef DEBUG
-  Serial.println("done I2C");
-  #endif
   // Pressure sensor
   #ifdef IS_MS5837
   uint8_t p_init_attempts = 0;
@@ -558,8 +558,18 @@ void log_line(String log_data) {
 
 void serial_output_user_prompt() {
   Serial.println(" ** eDNA Sampler ** ");
+  Serial.print("Time: ");
+  Serial.println(rtc.now().unixtime());
+  Serial.print("Pressure: ");
+  p_sensor.read();
+  Serial.print(p_sensor.pressure());
+  Serial.println("mBar");
+  Serial.print("Temperature: ");
+  c_sensor.read();
+  Serial.print(c_sensor.temperature());
+  Serial.println("C deg");
   Serial.print("Current Deployment Configurations for");
-  Serial.print(eDNA_uid);
+  Serial.println(eDNA_uid);
   
   Serial.print("-- Flowmeter (ticks/L): ");
   Serial.println(u_ticks_per_L);
@@ -584,7 +594,7 @@ void serial_output_user_prompt() {
   Serial.print("Target volume (ticks): ");
   Serial.println(u_target_flow_vol);
 
-
+  Serial.println("-------------------------------------------------------------------");
   Serial.println("Available commands:");
   Serial.println("download : dump all files onto the serial monitor");
   Serial.println("delete : delete all files");
