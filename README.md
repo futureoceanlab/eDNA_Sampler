@@ -1,7 +1,7 @@
 # eDNA Sampler
 This is a project that controls an autonomous eDNA Sampler. There are two modules: ESP8266 based hardware controller and a Django Web Application for interact with ESP8266 wirelessly.
 
-## Web App
+## webapp: Web App for online deployment configuration / data retrieval
 The program is run on a virtual environment, so install the virtualenv on the machine that will run the Web App.
 
 ```bash
@@ -43,7 +43,7 @@ python3 manage.py runserver 0.0.0.0:5000
 
 Finally, check the Firewall if the client cannot access the webapp.
 
-## ESP8266 Based Arduino code
+## sampler_mcu: ESP8266 Based Arduino code
 The system uses ESP8266 Huzzah from Adafruit and a variety of libraries, and thus, Arduino IDE requires some setup.
 
 In particular, the libraries that need to be installed are:
@@ -54,3 +54,12 @@ ArduinoJson,
 [TSYS01](https://github.com/bluerobotics/BlueRobotics_TSYS01_Library).
 
 [ESP8266 Huzzah](https://learn.adafruit.com/adafruit-huzzah-esp8266-breakout/using-arduino-ide) explains how to program the device using FTDI converter.
+
+## mechanical
+This directory contains designs and schematics for mechanical components of the eDNA Sampler.
+Specifically, we have 3D design of the battery housing and acrylic plates for the pvc clamp shell. 
+There is also the electronics housing drawing for machining.
+
+## pcb
+This is the schematic and layout of the PCB design of the electronics.
+

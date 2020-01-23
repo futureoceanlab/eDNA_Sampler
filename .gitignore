@@ -9,6 +9,8 @@ webapp/eDNA/log/*
 webapp/env/
 webapp/env/*
 
+.vscode
+.vscode/*
 !.gitignore
 !webapp/eDNA/data/.keep
 !webapp/eDNA/log/.keep
