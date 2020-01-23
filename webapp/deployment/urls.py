@@ -1,6 +1,10 @@
 from django.urls import path
 from . import views
 
+##
+# these are the url paths to access different functions in the views.py
+# all of these paths start with 'deployment/X/Y/Z'
+#
 urlpatterns = [
     path('', views.index, name='index'),
     path('logs', views.handle_logs, name='log_files'),

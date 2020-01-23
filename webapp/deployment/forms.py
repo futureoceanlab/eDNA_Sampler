@@ -1,5 +1,9 @@
 from django import forms
 
+
+##
+# This is the form that the user fills in the configuration page. 
+#
 class DeploymentForm(forms.Form):
     depth = forms.IntegerField(help_text="precision: 1m")
     depth_band = forms.IntegerField()     
@@ -15,6 +19,7 @@ class DeploymentForm(forms.Form):
 
     notes = forms.CharField(widget=forms.Textarea(attrs={"rows":5, "cols":40}))
 
+    # check that each input value is valid
     def clean(self):
         data = self.cleaned_data
         filled_depth = not(data['depth'] == 0 and data['depth_band'] == 0)

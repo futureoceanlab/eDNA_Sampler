@@ -3,6 +3,7 @@ from django.utils import timezone
 
 absolute_zero_C = -273.15
 
+# device is given a device id
 class Device(models.Model):
     device_id = models.IntegerField()
 
@@ -11,6 +12,7 @@ class Device(models.Model):
 
 
 # A deployment is associated with a single device
+# here we provide default values per deployment configuration as well
 class Deployment(models.Model):
     device = models.ForeignKey(Device, on_delete=models.CASCADE)
     is_new = models.BooleanField(default=True)

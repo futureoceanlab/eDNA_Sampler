@@ -1,6 +1,10 @@
 import os
 import time
 
+# views.py is the main controller of the web application.
+# it receives and sends data and serves frontend with appropriate information
+# onto the user
+
 from django.shortcuts import render, get_object_or_404, reverse
 from django.http import HttpResponse, HttpResponseRedirect, Http404, FileResponse, JsonResponse
 from django.template import loader
@@ -9,20 +13,27 @@ from django.utils import timezone
 from django.utils.encoding import smart_str
 from django.core.exceptions import ObjectDoesNotExist
 
-
-
 from .models import Device, Deployment
 from .forms import DeploymentForm
 
 from .createPlots import createPlot 
 
 
+""" For user frontend below """
+##
+# shows the main page of the web application
+# that lists all of the deployments (old and new)
+#
 def index(request):
     deployment_list =  Deployment.objects.order_by('has_data', 'pk')
     context = {'deployment_list': deployment_list}
     template = loader.get_template('deployment/index.html')
     return HttpResponse(template.render(context, request))
 
+
+##
+# serves the list of logs available to the user
+#
 def handle_logs(request):
     parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     file_path = os.path.join(parent_dir, 'eDNA', 'logs')
@@ -30,6 +41,11 @@ def handle_logs(request):
     context = {'logs_list': logs_list}
     return render(request, 'deployment/view_logs.html', context)
 
+
+##
+# This is the page where the user gets to configure the deployment
+# Each configuration is verified further in the "form"
+#
 def detail(request, uid):
     deployment = get_object_or_404(Deployment, eDNA_UID = uid)
     page_data = {"saved": False}
@@ -70,16 +86,24 @@ def detail(request, uid):
     page_data["deployment"] = deployment
     return render(request, 'deployment/detail.html', page_data)
 
+
+##
+# download a deployment specific data for the user
+#
 def get_data(request, uid):
     deployment = get_object_or_404(Deployment, eDNA_UID = uid)
     if deployment.has_data:
-        file_name = "{}.txt".format(deployment.eDNA_UID)
+        file_name = "{}.csv".format(deployment.eDNA_UID)
         parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         file_dir = os.path.join(parent_dir, 'eDNA', 'data', file_name)
         f_open = open(file_dir, 'rb')
         response = FileResponse(f_open, as_attachment=True)
-        return response #response
+        return response
 
+
+##
+# download a deployment specific log 
+#
 def get_log(request, log_name):
     file_name = "{}.txt".format(log_name)
     parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -90,6 +114,21 @@ def get_log(request, log_name):
     response = FileResponse(f_open, as_attachment=True)
     return response #response
 
+##
+# delete a deployment
+#
+def delete_deployment(request, uid):
+    if request.method == "POST":
+        deployment = get_object_or_404(Deployment, eDNA_UID=uid)
+        deployment.delete()
+        return HttpResponseRedirect(reverse('index', args=()))
+
+
+""" For ESP8266 from here on """
+##
+# For ESP8266
+# Returns configuration details
+#
 def get_config(request, uid):
     if request.method == "GET":
         deployment = get_object_or_404(Deployment, eDNA_UID = uid)
@@ -108,12 +147,10 @@ def get_config(request, uid):
         return response
 
 
-def delete_deployment(request, uid):
-    if request.method == "POST":
-        deployment = get_object_or_404(Deployment, eDNA_UID=uid)
-        deployment.delete()
-        return HttpResponseRedirect(reverse('index', args=()))
-
+##
+# For ESP8266
+# Returns current time in unixtime
+#
 def get_datetime(request):
     if request.method == "GET":
         datetime_now = int(time.mktime(timezone.now().timetuple())) # Timezone now defaults to UTC
@@ -121,18 +158,25 @@ def get_datetime(request):
         print(datetime_now)
         return JsonResponse(data)
 
+##
+# For ESP8266
+# Receives deployment data from the ESP8266.
+# Since the MCU cannot upload big files (bigger than few kB),
+# files are broken into small chunks
+#
 @csrf_exempt
 def upload_deployment_data(request, uid):
     if request.method == "POST":
         deployment = get_object_or_404(Deployment, eDNA_UID=uid)
+        # If the deployment does not have any data previously, it is ready to receive one
         if (deployment.has_data == False):
+            # Meta-data from the MCU
             n_chunks = int(request.headers["Chunks"])
             num_bytes = int(request.headers["Data-Bytes"])
-            nth_chunk = int(request.headers["Nth"])
+            nth_chunk = int(request.headers["Nth"]) # current nth chunk
             parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            print(n_chunks)
-            print(nth_chunk)
-            print(num_bytes)
+            # print(n_chunks)
+            # print(nth_chunk)
             
             if (nth_chunk < n_chunks):
             # Accumulate data first
@@ -141,12 +185,16 @@ def upload_deployment_data(request, uid):
                 with open(new_file, 'wb+') as dest:
                     dest.write(request.body[0:num_bytes])
             elif (nth_chunk == n_chunks):
+            # last chunk to be received, so gather all temp files and combine them
                 for i in range(1, n_chunks):
                     file_name = "{}_{}.txt".format(deployment.eDNA_UID, i)
                     file_path = os.path.join(parent_dir, 'eDNA', 'data', file_name)
+                    # if there is a file that does not exist in between, we need to get the data
+                    # again from the start
                     if not os.path.exists(file_path):
                         print("file not exists")
                         raise Http404("Missing intermediate files, send again")
+                # the final file
                 final_file_name = "{}.csv".format(deployment.eDNA_UID)
                 new_file = os.path.join(parent_dir, 'eDNA', 'data', final_file_name)
                 with open(new_file, 'wb+') as dest:
@@ -157,19 +205,21 @@ def upload_deployment_data(request, uid):
                             dest.write(temp_f.read())
                         os.remove(file_path)
                     dest.write(request.body[0:num_bytes])
-                print("Done")
+
                 createPlot(final_file_name)
+
                 deployment.has_data = True
                 deployment.is_new = False
                 deployment.save()
             else:
                 raise Http404("Unexpected nth chunk")
-
-        
         return HttpResponse(status=200)
     else:
         raise Http404("Invalid Post requst to deployment")
-
+##
+# For ESP8266
+# Similar to upload_deployment_data, get chunks of log from the MCU
+#
 @csrf_exempt
 def upload_log(request, uid):
     if request.method == "POST":
@@ -216,6 +266,11 @@ def upload_log(request, uid):
     else:
         raise Http404("Invalid Post requst to deployment")
 
+
+##
+# For ESP8266
+# The user has just tagged the RFID, and we are ready to 
+# create a new deployment
 @csrf_exempt
 def create_deployment(request, device_id):
     if request.method == "POST":
@@ -234,19 +289,30 @@ def create_deployment(request, device_id):
             deployment.save()
         return HttpResponse(status=200)
 
+
+##
+# For ESP8266
+# When the user power cycles the electronics, the MCU does not know its
+# previous state (deployment ready or not)
+# This function returns that information
+#
 def check_deployment(request, device_id):
     if request.method == "GET":
         data = {}
         device, device_created = Device.objects.get_or_create(device_id = device_id)
         if device_created:
+        # device was new, and thus there is no deployment yet
             data['status'] = 0
             device.save()
         else:
             deployment = Deployment.objects.filter(device=device, is_new=True).order_by('deployment_date').first()
             if deployment:
+            # there was an RFID tag that was tagged. Give the deployment information
+            # (i.e. RFID UID)
                 data['status'] = 1
                 data['eDNA_UID'] = deployment.eDNA_UID
             else:
+            # No deployment configured yet
                 data['status'] = 0
         response = JsonResponse(data)
         return response

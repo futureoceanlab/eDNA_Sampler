@@ -2,7 +2,13 @@ webapp/eDNA/__pycache__/
 webapp/eDNA/__pycache__/*
 webapp/deployment/__pycache__/
 webapp/deployment/__pycache__/**
+webapp/deployment/migrations/__pycache__/
+webapp/deployment/migrations/__pycache__/**
 webapp/eDNA/data/*
+webapp/eDNA/log/*
 webapp/env/
 webapp/env/*
 
+!.gitignore
+!webapp/eDNA/data/.keep
+!webapp/eDNA/log/.keep

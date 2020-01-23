@@ -2,6 +2,11 @@ import matplotlib.pyplot as plt
 import csv
 import os
 
+# function to create plots of: pressure, temperature, flow volume and flowrate
+# as a functoin of time. It is to give a quick feedback to the user
+# who just retreived the data
+#
+# fileName = name of the .csv file that contains the data
 def createPlot(fileName):
 	parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 	new_file = os.path.join(parent_dir, 'eDNA', 'data', fileName)
@@ -38,6 +43,7 @@ def createPlot(fileName):
 		ax[1,1].set_title("Flowrate")
 		ax[1,1].get_xaxis().set_visible(False)
 		ax[1,1].get_yaxis().set_visible(False)
+		# save to the webapp/eDNA/static/plots directory
 		plt.savefig(os.path.join(parent_dir, 'eDNA', 'static', 'plots', fileName.split(".")[0]+".png"))
 
 
