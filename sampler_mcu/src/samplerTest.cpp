@@ -1,4 +1,4 @@
-// #define UNITTEST
+#define UNITTEST
 #ifdef UNITTEST
 
 #include<iostream>
@@ -14,12 +14,6 @@ int numFailures = 0;
 int numTests = 0;
 
 void printTestResults(string testName, uint8_t numTestCases, uint8_t* testResults); 
-
-
-/**
- * User configuration 
- */
-
 
 
 /**
@@ -184,7 +178,44 @@ void testVolume1(Sampler sampler)
 
 // Start: depth or time
 // End: min flowrate
+void testFlowrate(Sampler sampler)
+{
+    // Start case
+    float tDepth = 200.f;                                               // m
+    float depthBand = 5.f;                                              // m
+    
+    // End case
+    float minFlowrate = 1;                                           // L/min
 
+    uint8_t numTestCases = 3;
+    uint8_t testResults[numTestCases] = {0};
+
+    sampler.setDeploymentConfig(0.f, tDepth, depthBand, ABS_ZERO_C, 0.f, 0, 0, minFlowrate, TICKS_PER_L);
+    testResults[0] = sampler.isValidUserConfig() == 1;
+
+    // dive start
+    // reached 200m (should start pumping) in 40 seconds
+    uint32_t t1 = 40;
+    float curDepth = 203.f;
+    uint32_t ticks = 0;
+    float decline = 0.02f;
+    testResults[1] = sampler.checkPumpTrigger(curDepth, 13.f, t1, ticks, 0) == PUMP_ON;    
+    sampler.setPumpStartTime(t1);
+    // Initial pump rate at 3L/min
+    // for loop to simulate linear decay of flowrate (0.02L/min)
+    // the pump should have stopped after 120
+    int i;
+    for (i = 1; i < 121; i++) {
+        ticks += (3 - (i * decline)) * TICKS_PER_L / 60;
+        if (i == 10) {
+            sampler.computeMaxFlowrate(ticks);
+        }
+        sampler.updateCurrentFlowrate(ticks);
+    }
+    testResults[2] = sampler.checkPumpTrigger(curDepth, 13.f, t1+i, ticks, i) == PUMP_OFF;
+    printTestResults("Flowrate1", numTestCases, testResults);
+
+}
 
 // Start: temperature + time
 // End: temperature
@@ -226,6 +257,7 @@ int main()
     testTemperature1(sampler);
     testTime1(sampler);
     testVolume1(sampler);
+    testFlowrate(sampler);
     cout << "Test ended with " << numFailures << " failures out of " << numTests << " tests" << endl;
     return 0;
     
