@@ -70,3 +70,5 @@ There is also the electronics housing drawing for machining.
 ## pcb
 This is the schematic and layout of the PCB design of the electronics.
 
+## archive
+This is a folder with ancient codes and files that were onced developed. They are irrelevant at this point, but archived in this folder.

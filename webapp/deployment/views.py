@@ -1,9 +1,10 @@
-import os
-import time
-
 # views.py is the main controller of the web application.
 # it receives and sends data and serves frontend with appropriate information
 # onto the user
+# Author: Junsu Jang
+# email: junsuj@mit.edu
+import os
+import time
 
 from django.shortcuts import render, get_object_or_404, reverse
 from django.http import HttpResponse, HttpResponseRedirect, Http404, FileResponse, JsonResponse

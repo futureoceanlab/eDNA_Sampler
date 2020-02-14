@@ -3,6 +3,7 @@
  * samplerWiFi.h
  * January 2020
  * Authors: JunSu Jang
+ * email: junsuj@mit.edu
  *        
  *      [Descriptions]
  * SamplerWiFi handles all of the actions that require WiFi connection.

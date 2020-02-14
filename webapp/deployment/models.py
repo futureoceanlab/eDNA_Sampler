@@ -1,3 +1,9 @@
+# Folder to develop the database
+#
+# Date: January 2020
+# Author: Junsu Jang
+# email: junsuj@mit.edu
+
 from django.db import models
 from django.utils import timezone
 

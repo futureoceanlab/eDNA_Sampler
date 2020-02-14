@@ -1,9 +1,14 @@
-from django import forms
-
-
 ##
 # This is the form that the user fills in the configuration page. 
 #
+#
+# Date: January 2020
+# Author: Junsu Jang
+# email: junsuj@mit.edu
+
+from django import forms
+
+
 class DeploymentForm(forms.Form):
     depth = forms.IntegerField(help_text="precision: 1m")
     depth_band = forms.IntegerField()     

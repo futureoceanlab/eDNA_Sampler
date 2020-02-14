@@ -1,10 +1,15 @@
-from django.urls import path
-from . import views
-
 ##
 # these are the url paths to access different functions in the views.py
 # all of these paths start with 'deployment/X/Y/Z'
 #
+# Date: January 2020
+# Author: Junsu Jang
+# email: junsuj@mit.edu
+
+from django.urls import path
+from . import views
+
+
 urlpatterns = [
     path('', views.index, name='index'),
     path('logs', views.handle_logs, name='log_files'),

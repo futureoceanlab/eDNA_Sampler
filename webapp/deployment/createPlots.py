@@ -6,6 +6,10 @@ import os
 # as a functoin of time. It is to give a quick feedback to the user
 # who just retreived the data
 #
+# Date: January 2020
+# Author: Evan Denmark
+# email: evanlewisdenmark@gmail.com
+
 # fileName = name of the .csv file that contains the data
 def createPlot(fileName):
 	parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
