@@ -1,6 +1,13 @@
 # eDNA Sampler
 This is a project that controls an autonomous eDNA Sampler. There are two modules: ESP8266 based hardware controller and a Django Web Application for interact with ESP8266 wirelessly.
 
+The detailed documentation on architecture, how-to-build, apparatus and testing can be found in eDNA_sampler.pdf in this repository. Furthermore, the link to view the overleaf can be found [here](https://www.overleaf.com/read/nvktmdfzfmym). Please send an email to junsuj@mit.edu if you would like to edit the documentation. 
+
+## Current Apparatus
+Feb 2020: We currently have one full-system ready to be disassembled in the lab. We have four packs of batteries and three housings with connectors ready to be assemebled. We have 9 PCB boards and required components to be soldered on the PCB.
+
+# Overview of this repository
+
 ## webapp: Web App for online deployment configuration / data retrieval
 The program is run on a virtual environment, so install the virtualenv on the machine that will run the Web App.
 
