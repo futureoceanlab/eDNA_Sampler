@@ -22,7 +22,7 @@ hyperlink==17.3.1
 idna==2.6
 imageio==2.5.0
 incremental==16.10.1
-Jinja2==2.10.3
+Jinja2==2.11.3
 jsonpatch==1.16
 jsonpointer==1.10
 jsonschema==2.6.0
