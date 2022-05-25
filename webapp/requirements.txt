@@ -46,7 +46,7 @@ pycparser==2.19
 pycrypto==2.6.1
 pygobject==3.26.1
 PyHamcrest==2.0.0
-PyJWT==1.5.3
+PyJWT==2.4.0
 pyOpenSSL==17.5.0
 pyparsing==2.4.6
 pyserial==3.4
