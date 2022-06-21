@@ -33,7 +33,7 @@ language-selector==0.1
 MarkupSafe==1.0
 matplotlib==3.1.2
 netifaces==0.10.4
-numpy==1.17.4
+numpy==1.22.0
 oauthlib==2.0.6
 packaging==20.0
 PAM==0.4.2
